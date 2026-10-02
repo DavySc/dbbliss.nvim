@@ -1,0 +1,29 @@
+# Integration-test databases. Works with Docker Desktop / Rancher Desktop (Linux containers)
+# on Windows and with plain Docker on Linux. Passwords here are throwaway test values for
+# local containers only; the tests read them from DBBLISS_TEST_* environment variables.
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: dbbliss
+      POSTGRES_PASSWORD: dbbliss-test-Pw1
+      POSTGRES_DB: dbbliss
+    ports:
+      - "55432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "dbbliss"]
+      interval: 2s
+      retries: 30
+
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: dbbliss-test-Pw1
+      MSSQL_PID: Developer
+    ports:
+      - "51433:1433"
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/mssql-tools18/bin/sqlcmd -C -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      interval: 3s
+      retries: 40
