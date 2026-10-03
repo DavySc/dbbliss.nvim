@@ -55,23 +55,20 @@ public sealed class SqlServerEngine : IEngine
         return new ErrorInfo(ex.Message);
     }
 
+    /// <summary>
+    /// Transactions are plain T-SQL statements, never SqlTransaction objects, so one opened or ended
+    /// by typed SQL is the same thing to the backend as one the API opened, and commands never need
+    /// a Transaction property. Every decision asks the server first (spec/quint/client.qnt, ServerTruth).
+    /// </summary>
     private sealed class Session(SqlConnection conn) : IEngineSession
     {
-        private SqlTransaction? _tx;
-
         public string ServerSessionId { get; } = conn.ServerProcessId.ToString(CultureInfo.InvariantCulture);
-
-        // A zombied SqlTransaction (server rolled it back, e.g. XACT_ABORT) has Connection == null.
-        private SqlTransaction? LiveTx => _tx?.Connection is not null ? _tx : null;
-
-        public bool InTransaction => LiveTx is not null;
 
         public async Task<ExecuteSummary> ExecuteAsync(string sql, IResultSink sink, QueryControl control)
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = sql;
             cmd.CommandTimeout = 0;
-            cmd.Transaction = LiveTx;
             control.SetProtocolCancel(cmd.Cancel);
             try
             {
@@ -93,31 +90,38 @@ public sealed class SqlServerEngine : IEngine
 
         public async Task BeginTransactionAsync(CancellationToken ct)
         {
-            if (InTransaction) throw new InvalidOperationException("A transaction is already open.");
-            _tx = (SqlTransaction)await conn.BeginTransactionAsync(ct);
+            if (await GetTransactionStateAsync(ct) != TransactionState.None)
+            {
+                throw new InvalidOperationException("A transaction is already open.");
+            }
+            await RunAsync("BEGIN TRANSACTION", ct);
         }
 
         public async Task CommitAsync(CancellationToken ct)
         {
-            var tx = LiveTx ?? throw new InvalidOperationException("No open transaction (it may have been rolled back by the server).");
-            await tx.CommitAsync(ct);
-            await tx.DisposeAsync();
-            _tx = null;
+            switch (await GetTransactionStateAsync(ct))
+            {
+                case TransactionState.None:
+                    throw new InvalidOperationException("No open transaction (it may have been rolled back by the server).");
+                case TransactionState.Aborted:
+                    throw new InvalidOperationException("The transaction is uncommittable; only rollback is possible.");
+            }
+            await RunAsync("COMMIT TRANSACTION", ct);
         }
 
-        public async Task RollbackAsync(CancellationToken ct)
+        public Task RollbackAsync(CancellationToken ct) => RunAsync("IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION", ct);
+
+        private async Task RunAsync(string sql, CancellationToken ct)
         {
-            var tx = LiveTx;
-            if (tx is not null) await tx.RollbackAsync(ct);
-            if (_tx is not null) await _tx.DisposeAsync();
-            _tx = null;
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            await cmd.ExecuteNonQueryAsync(ct);
         }
 
         public async Task<TransactionState> GetTransactionStateAsync(CancellationToken ct)
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = "SELECT @@TRANCOUNT, XACT_STATE()";
-            cmd.Transaction = LiveTx;
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             await reader.ReadAsync(ct);
             var trancount = reader.GetInt32(0);
@@ -131,11 +135,7 @@ public sealed class SqlServerEngine : IEngine
             };
         }
 
-        public async ValueTask DisposeAsync()
-        {
-            // Closing a non-pooled connection ends the server session, which rolls back any open transaction.
-            if (_tx is not null) await _tx.DisposeAsync();
-            await conn.DisposeAsync();
-        }
+        // Closing a non-pooled connection ends the server session, which rolls back any open transaction.
+        public ValueTask DisposeAsync() => conn.DisposeAsync();
     }
 }

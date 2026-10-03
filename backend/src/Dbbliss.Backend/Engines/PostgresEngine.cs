@@ -76,17 +76,18 @@ public sealed class PostgresEngine : IEngine
         return new ErrorInfo(ex.Message);
     }
 
+    /// <summary>
+    /// Transactions are plain BEGIN/COMMIT/ROLLBACK statements, never NpgsqlTransaction objects, so
+    /// a transaction the user opened or ended with typed SQL is the same thing to the backend as one
+    /// the API opened. Every decision asks the server first (spec/quint/client.qnt, ServerTruth).
+    /// </summary>
     private sealed class Session(NpgsqlConnection conn) : IEngineSession
     {
-        private NpgsqlTransaction? _tx;
-
         public string ServerSessionId { get; } = conn.ProcessID.ToString(CultureInfo.InvariantCulture);
-
-        public bool InTransaction => _tx is not null;
 
         public async Task<ExecuteSummary> ExecuteAsync(string sql, IResultSink sink, QueryControl control)
         {
-            await using var cmd = new NpgsqlCommand(sql, conn, _tx) { CommandTimeout = 0 };
+            await using var cmd = new NpgsqlCommand(sql, conn) { CommandTimeout = 0 };
             // Explicit NpgsqlCommand.Cancel() (a CancelRequest) rather than a CancellationToken:
             // Npgsql acts on the token only while it is blocked on network I/O. With rows already
             // buffered, the token never reaches the server and disposing the reader then drains
@@ -111,50 +112,60 @@ public sealed class PostgresEngine : IEngine
 
         public async Task BeginTransactionAsync(CancellationToken ct)
         {
-            if (_tx is not null) throw new InvalidOperationException("A transaction is already open.");
-            _tx = await conn.BeginTransactionAsync(ct);
+            if (await GetTransactionStateAsync(ct) != TransactionState.None)
+            {
+                throw new InvalidOperationException("A transaction is already open.");
+            }
+            await RunAsync("BEGIN", ct);
         }
 
         public async Task CommitAsync(CancellationToken ct)
         {
-            var tx = _tx ?? throw new InvalidOperationException("No open transaction.");
-            if (await GetTransactionStateAsync(ct) == TransactionState.Aborted)
+            switch (await GetTransactionStateAsync(ct))
             {
-                // PostgreSQL turns COMMIT of an aborted transaction into a silent ROLLBACK. Refuse instead.
-                throw new InvalidOperationException("The transaction was aborted by the server; only rollback is possible.");
+                case TransactionState.None:
+                    throw new InvalidOperationException("No open transaction.");
+                case TransactionState.Aborted:
+                    // PostgreSQL turns COMMIT of an aborted transaction into a silent ROLLBACK. Refuse instead.
+                    throw new InvalidOperationException("The transaction was aborted by the server; only rollback is possible.");
             }
-            await tx.CommitAsync(ct);
-            await tx.DisposeAsync();
-            _tx = null;
+            await RunAsync("COMMIT", ct);
         }
 
         public async Task RollbackAsync(CancellationToken ct)
         {
-            if (_tx is null) return;
-            await _tx.RollbackAsync(ct);
-            await _tx.DisposeAsync();
-            _tx = null;
+            // Skipped when there is nothing to roll back: ROLLBACK outside a transaction is a WARNING.
+            if (await GetTransactionStateAsync(ct) != TransactionState.None) await RunAsync("ROLLBACK", ct);
         }
 
+        /// <summary>
+        /// A transaction-local setting outlives the statement that sets it only inside a transaction
+        /// block, and setting it fails with 25P02 in an aborted one. Two round trips, no server log noise.
+        /// </summary>
         public async Task<TransactionState> GetTransactionStateAsync(CancellationToken ct)
         {
-            if (_tx is null) return TransactionState.None;
+            var token = Guid.NewGuid().ToString("N");
             try
             {
-                await using var cmd = new NpgsqlCommand("SELECT 1", conn, _tx);
-                await cmd.ExecuteScalarAsync(ct);
-                return TransactionState.Active;
+                await using var set = new NpgsqlCommand("SELECT set_config('dbbliss.tx_probe', @token, true)", conn);
+                set.Parameters.AddWithValue("token", token);
+                await set.ExecuteScalarAsync(ct);
             }
             catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.InFailedSqlTransaction)
             {
                 return TransactionState.Aborted;
             }
+            await using var get = new NpgsqlCommand("SELECT current_setting('dbbliss.tx_probe', true)", conn);
+            return await get.ExecuteScalarAsync(ct) as string == token ? TransactionState.Active : TransactionState.None;
         }
 
-        public async ValueTask DisposeAsync()
+        private async Task RunAsync(string sql, CancellationToken ct)
         {
-            if (_tx is not null) await _tx.DisposeAsync();
-            await conn.DisposeAsync();
+            await using var cmd = new NpgsqlCommand(sql, conn);
+            await cmd.ExecuteNonQueryAsync(ct);
         }
+
+        // Closing the session rolls back any open transaction on the server.
+        public ValueTask DisposeAsync() => conn.DisposeAsync();
     }
 }

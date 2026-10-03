@@ -41,13 +41,14 @@ The other variants are checked by random simulation, which finds their counterex
 
 | Module | Fixes on | Fails |
 |---|---|---|
-| `Proposed` | all three | nothing |
-| `Current` | none (the code today) | `NoSilentRollback`, `NoOrphanSession`, `HonestTxView` |
+| `Proposed` | all three (the code now) | nothing |
+| `Current` | none (the code before the fixes) | `NoSilentRollback`, `NoOrphanSession`, `HonestTxView` |
 | `NoServerTruth` | lease, Lua | `NoSilentRollback`, `HonestTxView` |
 | `LeaseBeforeWrite` | server truth, Lua | `HonestTxView` |
 | `LuaByName` | server truth, lease | `NoOrphanSession`, `HonestTxView` |
 
-What the counterexamples are, in the current code:
+What the counterexamples were in the code before the fixes. All three are fixed now, and each has
+tests that failed before the fix (see [Tests](#tests)):
 
 1. **Typed `BEGIN` on PostgreSQL is invisible** (`ServerTruth`). `GetTransactionStateAsync` returns
    `None` when the backend did not open the transaction itself (`_tx is null`), so Lua shows
@@ -68,7 +69,23 @@ What the counterexamples are, in the current code:
    `disconnect`), so a stale report can land on the new connection. The fix is to refuse `connect`
    for a name that is connected or connecting, and to key callbacks by connection id.
 
-Assumptions about driver behaviour are marked `ASSUMPTION` in the model. Each is a test to write
-against the real driver: Npgsql refusing `BeginTransaction`/`Commit` when the server state
-disagrees with the transaction object, and what `SELECT 1` and `Rollback` do on a completed
-`NpgsqlTransaction`. The failures above do not depend on them.
+Assumptions about driver behaviour are marked `ASSUMPTION` in the model. They all concern
+`NpgsqlTransaction` objects, which the engines no longer use: transactions are plain
+`BEGIN`/`COMMIT`/`ROLLBACK` statements and every decision asks the server. One was settled against
+the real driver before the fix: `SELECT 1` on an `NpgsqlTransaction` the server already ended
+throws, so after an API `begin` and a typed `COMMIT` the probe said `unknown` and every later
+`begin` was refused (`tx_typed_commit_after_api_begin`).
+
+## Tests
+
+The model's properties, checked against the code:
+
+| Test | Runs | Checks |
+|---|---|---|
+| `backend/tests/Dbbliss.ProtocolTests` | the real backend in-process, fake engine, no database | bug 1 (disconnect guard), bug 2 (stale `query/done`), shutdown closes every session |
+| `tests/nvim/client_test.lua` | the real Lua client, stub backend, headless Neovim | bug 3 (no orphaned session), a refused disconnect prompts |
+| `tx_*` scenarios in `backend/tests/Dbbliss.CancelTests` | the real backend and drivers against PostgreSQL and SQL Server | bug 1 in the engines: typed `BEGIN`/`COMMIT` seen, API rollback ends a typed `BEGIN`, aborted commit refused |
+
+The stale-report test holds the backend at its `query … completed` log line, which sits between
+the probe and the `query/done` write. If that line moves, the test fails with "hook moved" rather
+than passing. The same race on the `transaction/*` responses has no such hook and is not tested.

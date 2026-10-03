@@ -140,10 +140,10 @@ public sealed class Backend
             "disconnect" => (await DisconnectAsync(p), null),
             "execute" => Execute(p),
             "cancel" => (Cancel(p), null),
-            "transaction/begin" => (await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)), null),
-            "transaction/commit" => (await TransactionAsync(p, (s, ct) => s.CommitAsync(ct)), null),
-            "transaction/rollback" => (await TransactionAsync(p, (s, ct) => s.RollbackAsync(ct)), null),
-            "transaction/status" => (await TransactionStatusAsync(p), null),
+            "transaction/begin" => await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)),
+            "transaction/commit" => await TransactionAsync(p, (s, ct) => s.CommitAsync(ct)),
+            "transaction/rollback" => await TransactionAsync(p, (s, ct) => s.RollbackAsync(ct)),
+            "transaction/status" => await TransactionStatusAsync(p),
             "shutdown" => (new JsonObject(), () => _ = ShutdownAsync("shutdown requested")),
             _ => throw new RpcException(RpcErrors.MethodNotFound, $"Unknown method {method}."),
         };
@@ -191,17 +191,19 @@ public sealed class Backend
         var rollback = p["rollback"]?.GetValue<bool>() ?? false;
         await using (await connection.AcquireAsync())
         {
-            if (connection.Session.InTransaction && !rollback)
+            // The server decides, not local bookkeeping: a BEGIN typed as SQL counts too. A state the
+            // engine cannot ask about ("unknown") counts as open.
+            var transaction = await ProbeTransactionAsync(connection);
+            if (transaction != "none" && !rollback)
             {
                 // Never decide commit-or-rollback for the user: the caller must say so.
                 throw new RpcException(RpcErrors.TransactionOpen,
-                    "The connection has an open transaction. Commit or roll back first, or disconnect with rollback = true.");
+                    $"The connection has an open transaction ({transaction}). Commit or roll back first, or disconnect with rollback = true.");
             }
             _connections.TryRemove(connection.Id, out _);
-            var hadTransaction = connection.Session.InTransaction;
             await connection.Session.DisposeAsync();
-            Log.Info($"connection {connection.Id} closed{(hadTransaction ? " (open transaction rolled back)" : "")}");
-            return new JsonObject { ["rolled_back"] = hadTransaction };
+            Log.Info($"connection {connection.Id} closed{(transaction != "none" ? $" (transaction {transaction} rolled back)" : "")}");
+            return new JsonObject { ["rolled_back"] = transaction != "none" };
         }
     }
 
@@ -261,9 +263,6 @@ public sealed class Backend
         connection.CurrentStreamer = null;
 
         var transaction = await ProbeTransactionAsync(connection);
-        lease.Dispose();
-        _queries.TryRemove(run.QueryId, out _);
-        control.Dispose();
 
         var done = new JsonObject
         {
@@ -291,6 +290,11 @@ public sealed class Backend
         catch (IOException)
         {
         }
+        // Only now: an operation that takes the connection next must report after this query/done,
+        // or the client's last transaction report would be this stale one (spec/quint/client.qnt, LeaseAfterWrite).
+        lease.Dispose();
+        _queries.TryRemove(run.QueryId, out _);
+        control.Dispose();
     }
 
     /// <summary>Asks the server for the transaction state after every statement, so a server-side
@@ -370,24 +374,35 @@ public sealed class Backend
         return new JsonObject { ["transaction"] = await ProbeTransactionAsync(connection) };
     }
 
-    private async Task<JsonObject> TransactionAsync(JsonObject p, Func<IEngineSession, CancellationToken, Task> action)
+    /// <summary>
+    /// Runs a transaction call under the connection's lease and keeps the lease until the response is
+    /// written: the returned action, which <see cref="HandleLineAsync"/> runs after the write, releases it.
+    /// </summary>
+    private static async Task<(JsonNode, Action)> UnderLeaseAsync(Connection connection, Func<Task<JsonObject>> call)
     {
-        var connection = GetConnection(p);
-        using var lease = connection.TryAcquire()
+        var lease = connection.TryAcquire()
             ?? throw new RpcException(RpcErrors.ConnectionBusy, $"Connection {connection.Id} is running a query.");
-        return await TransactionAsync(connection, action);
+        try
+        {
+            return (await call(), lease.Dispose);
+        }
+        catch
+        {
+            lease.Dispose();
+            throw;
+        }
     }
 
-    private async Task<JsonObject> TransactionStatusAsync(JsonObject p)
+    private Task<(JsonNode, Action)> TransactionAsync(JsonObject p, Func<IEngineSession, CancellationToken, Task> action)
     {
         var connection = GetConnection(p);
-        using var lease = connection.TryAcquire()
-            ?? throw new RpcException(RpcErrors.ConnectionBusy, $"Connection {connection.Id} is running a query.");
-        return new JsonObject
-        {
-            ["transaction"] = await ProbeTransactionAsync(connection),
-            ["local_transaction"] = connection.Session.InTransaction,
-        };
+        return UnderLeaseAsync(connection, () => TransactionAsync(connection, action));
+    }
+
+    private Task<(JsonNode, Action)> TransactionStatusAsync(JsonObject p)
+    {
+        var connection = GetConnection(p);
+        return UnderLeaseAsync(connection, async () => new JsonObject { ["transaction"] = await ProbeTransactionAsync(connection) });
     }
 
     /// <summary>
@@ -413,7 +428,6 @@ public sealed class Backend
             }
             foreach (var connection in _connections.Values)
             {
-                var inTx = connection.Session.InTransaction;
                 var close = connection.Session.DisposeAsync().AsTask();
                 if (await Task.WhenAny(close, Task.Delay(TimeSpan.FromSeconds(5))) != close)
                 {
@@ -421,7 +435,7 @@ public sealed class Backend
                 }
                 else
                 {
-                    Log.Info($"connection {connection.Id} closed{(inTx ? " (open transaction rolled back)" : "")}");
+                    Log.Info($"connection {connection.Id} closed (any open transaction rolled back)");
                 }
             }
             _connections.Clear();

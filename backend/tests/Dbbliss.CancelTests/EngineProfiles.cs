@@ -29,6 +29,10 @@ public abstract class EngineProfile
 
     public virtual bool SupportsServerTransactionView => true;
 
+    /// <summary>Transaction control typed by the user as ordinary SQL.</summary>
+    public virtual string TypedBeginSql => "BEGIN";
+    public virtual string TypedCommitSql => "COMMIT";
+
     protected string Password => Environment.GetEnvironmentVariable(PasswordEnv) ?? "";
 
     public abstract Task<DbConnection> OpenObserverAsync();
@@ -113,6 +117,8 @@ public sealed class PostgresProfile : EngineProfile
 public sealed class SqlServerProfile : EngineProfile
 {
     public override string Engine => "sqlserver";
+    public override string TypedBeginSql => "BEGIN TRANSACTION";
+    public override string TypedCommitSql => "COMMIT TRANSACTION";
     public override string SleepSql => "WAITFOR DELAY '00:01:00'";
     public override string? BatchThenSleepSql => "SELECT 1 AS a; WAITFOR DELAY '00:01:00'";
     public override string StreamingSql =>

@@ -11,9 +11,9 @@
  *     registration) runs in that order; everything after the first await interleaves freely;
  *   - the database server: the real transaction state of each session.
  *
- * Statements typed by the user may themselves be BEGIN / COMMIT / ROLLBACK. The backend only
- * knows about transactions it opened through the driver (its local bookkeeping), which is where
- * most of what this model finds comes from.
+ * Statements typed by the user may themselves be BEGIN / COMMIT / ROLLBACK. Without the
+ * ServerTruth fix the backend only knows about transactions it opened through the driver (its
+ * local bookkeeping), which is where most of what this model finds comes from.
  *
  * Driver behaviour that is assumed rather than verified is marked ASSUMPTION. Each one is a test
  * to write against the real drivers before relying on a result that depends on it.

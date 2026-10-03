@@ -28,6 +28,12 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
         yield return ("streaming_cancel_stalled_client", StreamingCancelStalledClient);
         yield return ("tx_cancel", () => TransactionCancel("tx_cancel", xactAbort: false));
         if (profile.Engine == "sqlserver") yield return ("tx_cancel_xact_abort", () => TransactionCancel("tx_cancel_xact_abort", xactAbort: true));
+        if (profile.SupportsServerTransactionView)
+        {
+            yield return ("tx_typed_begin", TypedBegin);
+            yield return ("tx_typed_commit_after_api_begin", TypedCommitAfterApiBegin);
+            yield return ("tx_aborted_commit_refused", AbortedCommitRefused);
+        }
         yield return ("backend_stdin_closed", () => BackendDeath("backend_stdin_closed", c => { c.CloseStdin(); return Task.CompletedTask; }));
         yield return ("backend_sigterm", BackendSigterm);
         yield return ("backend_killed", () => BackendDeath("backend_killed", c => { c.Kill(); return Task.CompletedTask; }));
@@ -279,6 +285,115 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
         {
             await profile.ExecAsync(observer, profile.DropProbeTableSql(table));
         }
+    }
+
+    private static bool ServerHasTransaction(ServerView v) => v.TransactionState is "active" or "aborted" or "open";
+
+    private async Task<string?> RunToDoneAsync(BackendClient c, string connId, string queryId, string sql)
+    {
+        await Execute(c, connId, queryId, sql);
+        var done = await c.WaitDoneAsync(queryId, DoneTimeoutMs);
+        return done["params"]!["transaction"]?.GetValue<string>();
+    }
+
+    private static async Task<string> TxCallAsync(BackendClient c, string connId, string op)
+    {
+        try
+        {
+            var r = await c.RequestAsync("transaction/" + op, new JsonObject { ["connection_id"] = connId });
+            return r["transaction"]!.GetValue<string>();
+        }
+        catch (BackendErrorException ex)
+        {
+            return "error " + ex.Error["code"];
+        }
+    }
+
+    /// <summary>
+    /// spec/quint/client.qnt, bug 1: a BEGIN typed as SQL must be reported, must block a plain
+    /// disconnect, and the API rollback must end it.
+    /// </summary>
+    private async Task<ScenarioResult> TypedBegin()
+    {
+        const string name = "tx_typed_begin";
+        await using var observer = await profile.OpenObserverAsync();
+        var (c, connId, session) = await StartAsync();
+        await using var _ = c;
+        var steps = new List<string>();
+        var ok = true;
+        void Step(string what, bool good)
+        {
+            steps.Add(what + (good ? "" : " (WRONG)"));
+            ok &= good;
+        }
+
+        var reported = await RunToDoneAsync(c, connId, "b", profile.TypedBeginSql);
+        var server = await profile.ViewAsync(observer, session);
+        Step($"after typed begin: backend={reported} server={server.TransactionState}", reported == "active" && ServerHasTransaction(server));
+
+        string disconnect;
+        try
+        {
+            await c.RequestAsync("disconnect", new JsonObject { ["connection_id"] = connId, ["rollback"] = false });
+            disconnect = "accepted";
+        }
+        catch (BackendErrorException ex)
+        {
+            disconnect = "error " + ex.Error["code"];
+        }
+        server = await profile.ViewAsync(observer, session);
+        Step($"plain disconnect: {disconnect}, server={server.TransactionState}", disconnect == "error 1003" && ServerHasTransaction(server));
+
+        if (disconnect != "accepted")
+        {
+            var rollback = await TxCallAsync(c, connId, "rollback");
+            server = await profile.ViewAsync(observer, session);
+            Step($"api rollback: {rollback}, server={server.TransactionState}", rollback == "none" && !ServerHasTransaction(server));
+        }
+        return Result(name, ok ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
+    }
+
+    /// <summary>A transaction opened by the API and ended by typed SQL leaves the connection usable.</summary>
+    private async Task<ScenarioResult> TypedCommitAfterApiBegin()
+    {
+        const string name = "tx_typed_commit_after_api_begin";
+        await using var observer = await profile.OpenObserverAsync();
+        var (c, connId, session) = await StartAsync();
+        await using var _ = c;
+        var begin = await TxCallAsync(c, connId, "begin");
+        var commitReported = await RunToDoneAsync(c, connId, "c", profile.TypedCommitSql);
+        var server = await profile.ViewAsync(observer, session);
+        var begin2 = await TxCallAsync(c, connId, "begin");
+        var commit2 = await TxCallAsync(c, connId, "commit");
+        var after = await profile.ViewAsync(observer, session);
+        var ok = begin == "active" && commitReported == "none" && !ServerHasTransaction(server)
+                 && begin2 == "active" && commit2 == "none" && !ServerHasTransaction(after);
+        return Result(name, ok ? Outcome.Pass : Outcome.Fail,
+            $"begin={begin} typed_commit={commitReported} server={server.TransactionState} begin_again={begin2} commit={commit2} server_after={after.TransactionState}");
+    }
+
+    /// <summary>
+    /// After an error, commit is refused and rollback works. PostgreSQL keeps the transaction open but
+    /// aborted (a COMMIT there would silently roll it back). SQL Server rolls it back with the batch:
+    /// an uncommittable transaction never outlives the batch that doomed it.
+    /// </summary>
+    private async Task<ScenarioResult> AbortedCommitRefused()
+    {
+        const string name = "tx_aborted_commit_refused";
+        await using var observer = await profile.OpenObserverAsync();
+        var (c, connId, session) = await StartAsync();
+        await using var _ = c;
+        if (profile.Engine == "sqlserver") await RunToDoneAsync(c, connId, "xa", "SET XACT_ABORT OFF");
+        var begin = await TxCallAsync(c, connId, "begin");
+        var failSql = profile.Engine == "sqlserver" ? "SELECT CONVERT(int, 'x')" : "SELECT 1/0";
+        var failed = await RunToDoneAsync(c, connId, "f", failSql);
+        var commit = await TxCallAsync(c, connId, "commit");
+        var server = await profile.ViewAsync(observer, session);
+        var rollback = await TxCallAsync(c, connId, "rollback");
+        var after = await profile.ViewAsync(observer, session);
+        var ok = begin == "active" && commit.StartsWith("error", StringComparison.Ordinal) && rollback == "none" && !ServerHasTransaction(after);
+        return Result(name, ok ? Outcome.Pass : Outcome.Fail,
+            $"begin={begin} after_error={failed} commit={commit} server={server.TransactionState} rollback={rollback} server_after={after.TransactionState}");
     }
 
     private async Task<ScenarioResult> BackendDeath(string name, Func<BackendClient, Task> kill, JsonObject? options = null)

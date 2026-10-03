@@ -23,8 +23,6 @@ public interface IEngineSession : IAsyncDisposable
     /// <summary>Server-side identity of this session: PG backend pid, SQL Server SPID, IBM i job name.</summary>
     string ServerSessionId { get; }
 
-    bool InTransaction { get; }
-
     /// <summary>
     /// Runs <paramref name="sql"/> and streams every result set into <paramref name="sink"/>.
     /// Cancellation is driven by <paramref name="control"/>: the engine registers the protocol-level
@@ -32,6 +30,11 @@ public interface IEngineSession : IAsyncDisposable
     /// </summary>
     Task<ExecuteSummary> ExecuteAsync(string sql, IResultSink sink, QueryControl control);
 
+    /// <summary>
+    /// The API's transaction calls. They act on the server's transaction, whoever opened it (the
+    /// API or typed SQL), and throw <see cref="InvalidOperationException"/> when the server's state
+    /// does not allow the call. Rollback with no transaction open does nothing.
+    /// </summary>
     Task BeginTransactionAsync(CancellationToken ct);
     Task CommitAsync(CancellationToken ct);
     Task RollbackAsync(CancellationToken ct);

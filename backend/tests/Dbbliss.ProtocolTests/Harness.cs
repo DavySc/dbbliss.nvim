@@ -1,0 +1,212 @@
+using System.IO.Pipes;
+using System.Text;
+using System.Text.Json.Nodes;
+using Dbbliss.Backend.Rpc;
+
+namespace Dbbliss.ProtocolTests;
+
+public sealed class TestFailure(string message) : Exception(message);
+
+/// <summary>
+/// The real <see cref="Backend.Backend"/> in-process, speaking JSON-RPC over anonymous pipes, with
+/// <see cref="FakeEngine"/> as its only engine. Every message the backend writes is kept in order.
+/// </summary>
+public sealed class Harness : IAsyncDisposable
+{
+    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
+
+    private readonly AnonymousPipeServerStream _stdin = new(PipeDirection.Out);
+    private readonly AnonymousPipeServerStream _stdout = new(PipeDirection.In);
+    private readonly StreamWriter _writer;
+    private readonly List<JsonObject> _messages = [];
+    private readonly SemaphoreSlim _arrived = new(0);
+    private readonly Task _run;
+    private readonly Task _read;
+    private int _nextId;
+
+    public FakeServer Server { get; } = new();
+
+    public Backend.Backend Backend { get; }
+
+    public Harness()
+    {
+        var backendIn = new AnonymousPipeClientStream(PipeDirection.In, _stdin.ClientSafePipeHandle);
+        var backendOut = new AnonymousPipeClientStream(PipeDirection.Out, _stdout.ClientSafePipeHandle);
+        Backend = new Backend.Backend(new Output(backendOut), [new FakeEngine(Server)]);
+        _writer = new StreamWriter(_stdin, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
+        _run = Task.Run(() => Backend.RunAsync(backendIn));
+        _read = Task.Run(ReadLoopAsync);
+    }
+
+    private async Task ReadLoopAsync()
+    {
+        using var reader = new StreamReader(_stdout, new UTF8Encoding(false));
+        while (await reader.ReadLineAsync() is { } line)
+        {
+            lock (_messages) _messages.Add((JsonObject)JsonNode.Parse(line)!);
+            _arrived.Release();
+        }
+    }
+
+    /// <summary>Every message so far, in the order the backend wrote them.</summary>
+    public IReadOnlyList<JsonObject> Messages
+    {
+        get { lock (_messages) return [.. _messages]; }
+    }
+
+    public int Send(string method, JsonObject? @params = null)
+    {
+        var id = Interlocked.Increment(ref _nextId);
+        var request = new JsonObject { ["jsonrpc"] = "2.0", ["id"] = id, ["method"] = method, ["params"] = @params ?? [] };
+        lock (_writer) _writer.WriteLine(request.ToJsonString());
+        return id;
+    }
+
+    /// <summary>Sends a request and returns its response (result or error).</summary>
+    public Task<JsonObject> CallAsync(string method, JsonObject? @params = null)
+    {
+        var id = Send(method, @params);
+        return WaitForAsync(m => m["id"]?.GetValue<int>() == id && m["method"] is null, $"response to {method}");
+    }
+
+    /// <summary>Sends a request and returns its result; an error response fails the test.</summary>
+    public async Task<JsonObject> ResultAsync(string method, JsonObject? @params = null)
+    {
+        var response = await CallAsync(method, @params);
+        return response["result"] as JsonObject
+            ?? throw new TestFailure($"{method} failed: {response["error"]?.ToJsonString()}");
+    }
+
+    public Task<JsonObject> NotificationAsync(string method, string queryId) =>
+        WaitForAsync(m => m["method"]?.GetValue<string>() == method && m["params"]?["query_id"]?.GetValue<string>() == queryId,
+            $"{method} for {queryId}");
+
+    public async Task<JsonObject> WaitForAsync(Func<JsonObject, bool> match, string what)
+    {
+        var deadline = DateTime.UtcNow + Timeout;
+        while (true)
+        {
+            if (Messages.FirstOrDefault(match) is { } found) return found;
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero || !await _arrived.WaitAsync(left))
+            {
+                throw new TestFailure($"timed out waiting for {what}");
+            }
+        }
+    }
+
+    public async Task<string> ConnectAsync()
+    {
+        var result = await ResultAsync("connect", new JsonObject { ["engine"] = "fake", ["connection_string"] = "fake" });
+        return result["connection_id"]!.GetValue<string>();
+    }
+
+    /// <summary>Closes stdin, as Neovim exiting does, and waits for the backend to finish.</summary>
+    public async Task CloseAsync()
+    {
+        _stdin.Dispose();
+        await _run.WaitAsync(Timeout);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await CloseAsync();
+            await _read.WaitAsync(Timeout);
+        }
+        catch (TimeoutException)
+        {
+        }
+        _stdout.Dispose();
+    }
+}
+
+/// <summary>
+/// What the Lua client believes about each connection's transaction: the value from the last
+/// query/done or transaction/* response, applied in arrival order (lua/dbbliss/init.lua does the same).
+/// </summary>
+public static class ClientView
+{
+    public static Dictionary<string, string> Transactions(IReadOnlyList<JsonObject> messages, IReadOnlyDictionary<int, string> requestConnections, IReadOnlyDictionary<string, string> queryConnections)
+    {
+        var view = new Dictionary<string, string>();
+        foreach (var m in messages)
+        {
+            if (m["method"]?.GetValue<string>() == "query/done"
+                && queryConnections.TryGetValue(m["params"]!["query_id"]!.GetValue<string>(), out var qc)
+                && m["params"]!["transaction"]?.GetValue<string>() is { } qt)
+            {
+                view[qc] = qt;
+            }
+            else if (m["method"] is null && m["id"]?.GetValue<int>() is { } id
+                && requestConnections.TryGetValue(id, out var rc)
+                && m["result"]?["transaction"]?.GetValue<string>() is { } rt)
+            {
+                view[rc] = rt;
+            }
+        }
+        return view;
+    }
+}
+
+/// <summary>
+/// Replaces stderr, where the backend logs. Lets a test hold the backend at a chosen log line,
+/// which is how the stale-report race is made deterministic.
+/// </summary>
+public sealed class StderrGate : TextWriter
+{
+    private readonly TextWriter _original;
+    private readonly bool _echo;
+    private string? _armed;
+    private TaskCompletionSource? _reached;
+    private ManualResetEventSlim? _release;
+
+    private StderrGate(TextWriter original, bool echo)
+    {
+        _original = original;
+        _echo = echo;
+    }
+
+    public static StderrGate Current { get; private set; } = null!;
+
+    public static StderrGate Install(bool echo)
+    {
+        Current = new StderrGate(Console.Error, echo);
+        Console.SetError(Current);
+        return Current;
+    }
+
+    public override Encoding Encoding => Encoding.UTF8;
+
+    /// <summary>The next log line containing <paramref name="text"/> blocks until <see cref="Release"/>.</summary>
+    public Task Arm(string text)
+    {
+        _release = new ManualResetEventSlim(false);
+        _reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref _armed, text);
+        return _reached.Task;
+    }
+
+    public void Release()
+    {
+        Volatile.Write(ref _armed, null);
+        _release?.Set();
+    }
+
+    public override void WriteLine(string? value)
+    {
+        if (_echo) _original.WriteLine(value);
+        if (value is not null && Volatile.Read(ref _armed) is { } armed && value.Contains(armed, StringComparison.Ordinal))
+        {
+            Volatile.Write(ref _armed, null);
+            _reached!.TrySetResult();
+            _release!.Wait(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    public override void Write(char value)
+    {
+        if (_echo) _original.Write(value);
+    }
+}

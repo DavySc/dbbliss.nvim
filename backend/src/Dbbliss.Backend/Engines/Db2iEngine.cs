@@ -72,8 +72,6 @@ public sealed class Db2iEngine : IEngine
 
         public string ServerSessionId => jobName;
 
-        public bool InTransaction => _tx is not null;
-
         public Task<ExecuteSummary> ExecuteAsync(string sql, IResultSink sink, QueryControl control) =>
             Task.Factory.StartNew(() =>
             {

@@ -63,6 +63,14 @@ jobs:
         shell: pwsh
         run: scripts/build.ps1 -Rid win-x64
 
+      - name: Protocol tests (fake engine)
+        shell: bash
+        run: dotnet run --project backend/tests/Dbbliss.ProtocolTests
+
+      - name: Lua client tests
+        shell: bash
+        run: nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua
+
       - name: Phase 0 cancel suite
         shell: bash
         run: dotnet run --project backend/tests/Dbbliss.CancelTests -- --report cancel-report.md

@@ -4,5 +4,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Dbbliss.CancelTests/Dbbliss.CancelTests.csproj" />
+    <Project Path="tests/Dbbliss.ProtocolTests/Dbbliss.ProtocolTests.csproj" />
   </Folder>
 </Solution>

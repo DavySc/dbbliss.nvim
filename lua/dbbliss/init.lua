@@ -4,6 +4,9 @@ local backend_mod = require('dbbliss.backend')
 
 local M = {}
 
+--- Backend error code: disconnect refused because the server has an open transaction.
+local TRANSACTION_OPEN = 1003
+
 ---@class dbbliss.ConnectionConfig
 ---@field engine 'postgres'|'sqlserver'|'db2i'
 ---@field connection_string string  without the password
@@ -31,8 +34,10 @@ local state = {
   backend_info = nil,
   --- name → { id, server_session_id, engine, transaction }
   connections = {},
+  --- names with a connect request in flight
+  connecting = {},
   current = nil, ---@type string?
-  --- query id → { connection, status, rows, result_sets, on_done }
+  --- query id → { connection (name), connection_id, status, rows, result_sets, on_done }
   queries = {},
   seq = 0,
   results_buf = nil, ---@type integer?
@@ -41,6 +46,17 @@ M._state = state
 
 local function notify(msg, level)
   vim.notify('dbbliss: ' .. msg, level or vim.log.levels.INFO)
+end
+
+--- Backend replies are matched to connections by backend id, never by name: a name can be
+--- disconnected and connected again while an old reply is still on its way.
+---@return string? name, table? conn
+local function connection_by_id(id)
+  for name, c in pairs(state.connections) do
+    if c.id == id then
+      return name, c
+    end
+  end
 end
 
 local function plugin_root()
@@ -128,6 +144,7 @@ local function on_backend_exit(code, signal)
   end
   state.queries = {}
   state.connections = {}
+  state.connecting = {}
   state.current = nil
   state.backend = nil
   if had or code ~= 0 then
@@ -191,12 +208,16 @@ local function register_handlers(b)
       end
     end
     if q then
-      local conn = state.connections[q.connection]
+      local name, conn = connection_by_id(q.connection_id)
       if conn and p.transaction then
         if conn.transaction ~= 'none' and p.transaction == 'none' then
-          notify('the server ended the transaction on ' .. q.connection .. ' (rolled back)', vim.log.levels.ERROR)
+          if p.status == 'completed' then
+            notify('the transaction on ' .. name .. ' ended')
+          else
+            notify('the server rolled back the transaction on ' .. name, vim.log.levels.ERROR)
+          end
         elseif p.transaction == 'aborted' then
-          notify('the transaction on ' .. q.connection .. ' is aborted: only rollback is possible', vim.log.levels.ERROR)
+          notify('the transaction on ' .. name .. ' is aborted: only rollback is possible', vim.log.levels.ERROR)
         end
         conn.transaction = p.transaction
       end
@@ -237,13 +258,24 @@ function M.connect(name, cb)
     notify('unknown connection ' .. tostring(name), vim.log.levels.ERROR)
     return
   end
+  if state.connections[name] or state.connecting[name] then
+    -- A second session under the same name would orphan the first, with its transaction and locks.
+    local err = { message = name .. ' is already connected or connecting; disconnect first' }
+    notify(err.message, vim.log.levels.ERROR)
+    if cb then
+      cb(err, nil)
+    end
+    return
+  end
   local b = M.ensure_backend()
+  state.connecting[name] = true
   b:request('connect', {
     engine = cfg.engine,
     connection_string = cfg.connection_string,
     password = cfg.password,
     options = cfg.options,
   }, function(err, result)
+    state.connecting[name] = nil
     if err then
       notify(('connect %s failed: %s'):format(name, err.message), vim.log.levels.ERROR)
     else
@@ -284,6 +316,7 @@ function M.execute(sql, opts)
   local query_id = ('q%d-%d'):format((vim.uv or vim.loop).os_getpid(), state.seq)
   state.queries[query_id] = {
     connection = name,
+    connection_id = conn.id,
     status = 'running',
     rows = 0,
     result_sets = 0,
@@ -327,17 +360,21 @@ function M.cancel(query_id)
 end
 
 local function transaction(method)
-  local name, conn = current_connection()
+  local _, conn = current_connection()
   if not conn then
     return
   end
-  state.backend:request('transaction/' .. method, { connection_id = conn.id }, function(err, result)
+  local id = conn.id
+  state.backend:request('transaction/' .. method, { connection_id = id }, function(err, result)
     if err then
       notify(method .. ' failed: ' .. err.message, vim.log.levels.ERROR)
       return
     end
-    conn.transaction = result.transaction
-    notify(('%s on %s: transaction %s'):format(method, name, result.transaction))
+    local name, c = connection_by_id(id)
+    if c then
+      c.transaction = result.transaction
+      notify(('%s on %s: transaction %s'):format(method, name, result.transaction))
+    end
   end)
 end
 
@@ -356,25 +393,37 @@ function M.disconnect()
   if not conn then
     return
   end
-  local function close(rollback)
-    state.backend:request('disconnect', { connection_id = conn.id, rollback = rollback }, function(err)
+  local id = conn.id
+  local function confirm_rollback()
+    local choice = vim.fn.confirm(('%s has an open transaction. Roll it back and disconnect?'):format(name), '&Rollback\n&Cancel', 2)
+    return choice == 1
+  end
+  local close
+  function close(rollback)
+    state.backend:request('disconnect', { connection_id = id, rollback = rollback }, function(err)
       if err then
-        notify('disconnect failed: ' .. err.message, vim.log.levels.ERROR)
+        -- The backend asks the server; it may know of a transaction this client has not heard of.
+        if err.code == TRANSACTION_OPEN and not rollback and confirm_rollback() then
+          close(true)
+        elseif err.code ~= TRANSACTION_OPEN or rollback then
+          notify('disconnect failed: ' .. err.message, vim.log.levels.ERROR)
+        end
         return
       end
-      state.connections[name] = nil
-      if state.current == name then
-        state.current = nil
+      local n = connection_by_id(id)
+      if n then
+        state.connections[n] = nil
+        if state.current == n then
+          state.current = nil
+        end
       end
       notify('disconnected from ' .. name)
     end)
   end
   if conn.transaction ~= 'none' then
-    local choice = vim.fn.confirm(('%s has an open transaction. Roll it back and disconnect?'):format(name), '&Rollback\n&Cancel', 2)
-    if choice ~= 1 then
-      return
+    if confirm_rollback() then
+      close(true)
     end
-    close(true)
   else
     close(false)
   end

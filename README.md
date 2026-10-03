@@ -63,6 +63,10 @@ scripts/build.sh
 export DBBLISS_TEST_PG='Host=localhost;Port=55432;Username=dbbliss;Database=dbbliss' DBBLISS_TEST_PG_PASSWORD=dbbliss-test-Pw1
 export DBBLISS_TEST_MSSQL='Server=localhost,51433;User Id=sa;TrustServerCertificate=true' DBBLISS_TEST_MSSQL_PASSWORD=dbbliss-test-Pw1
 dotnet run --project backend/tests/Dbbliss.CancelTests
+
+# No database needed:
+dotnet run --project backend/tests/Dbbliss.ProtocolTests
+nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua
 ```
 
 The cancel suite drives the real backend (and a real headless Neovim for the "Neovim closed"
