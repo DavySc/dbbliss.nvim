@@ -3,3 +3,5 @@ obj/
 *.user
 .vs/
 cancel-report.md
+_apalache-out/
+states/
