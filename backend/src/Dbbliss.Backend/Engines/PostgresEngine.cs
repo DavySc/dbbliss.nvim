@@ -94,8 +94,12 @@ public sealed class PostgresEngine : IEngine
             control.SetProtocolCancel(cmd.Cancel);
             try
             {
+            // Narrows the window TLC found (ShutdownCancel before Send): a cancel that arrived
+            // before this point must not let the statement go out. The remaining window between
+            // this check and the send is covered by the re-fire watchdog.
+            control.Token.ThrowIfCancellationRequested();
                 await using var reader = await cmd.ExecuteReaderAsync(CancellationToken.None);
-                await AdoStreaming.StreamAsync(reader, sink, control, CancellationToken.None);
+                await AdoStreaming.StreamAsync(reader, sink);
                 await reader.CloseAsync();
                 return new ExecuteSummary(reader.RecordsAffected);
             }

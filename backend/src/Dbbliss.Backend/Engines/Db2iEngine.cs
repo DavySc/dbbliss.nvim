@@ -86,7 +86,7 @@ public sealed class Db2iEngine : IEngine
                 {
                     control.Token.ThrowIfCancellationRequested();
                     using var reader = cmd.ExecuteReader();
-                    AdoStreaming.Stream(reader, sink, control);
+                    AdoStreaming.Stream(reader, sink);
                     reader.Close();
                     return new ExecuteSummary(reader.RecordsAffected);
                 }

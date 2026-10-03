@@ -54,11 +54,15 @@ public sealed record ColumnInfo(string Name, string Type);
 
 public sealed record ExecuteSummary(long RowsAffected);
 
+/// <summary>
+/// Receives everything the driver reads. Never throws because of a cancel: rows the server sent
+/// must not be dropped by unwinding the driver's reader (see spec/tla/QueryLifecycle.tla).
+/// </summary>
 public interface IResultSink
 {
-    ValueTask ResultSetAsync(int index, IReadOnlyList<ColumnInfo> columns, CancellationToken ct);
-    ValueTask RowAsync(int index, JsonArray row, CancellationToken ct);
-    ValueTask ResultSetDoneAsync(int index, long rows, CancellationToken ct);
+    ValueTask ResultSetAsync(int index, IReadOnlyList<ColumnInfo> columns);
+    ValueTask RowAsync(int index, JsonArray row);
+    ValueTask ResultSetDoneAsync(int index, long rows);
 }
 
 public interface IMessageSink

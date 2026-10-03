@@ -38,10 +38,15 @@ public sealed class Backend
     private int _nextConnection;
 
     public Backend(Output output)
+        : this(output, [new SqlServerEngine(), new PostgresEngine(), new Db2iEngine()])
+    {
+    }
+
+    /// <summary>Tests pass fake engines here.</summary>
+    public Backend(Output output, IEnumerable<IEngine> engines)
     {
         _output = output;
-        _engines = new IEngine[] { new SqlServerEngine(), new PostgresEngine(), new Db2iEngine() }
-            .ToDictionary(e => e.Name);
+        _engines = engines.ToDictionary(e => e.Name);
         _output.Broken += () => _ = ShutdownAsync("stdout closed");
     }
 
@@ -273,6 +278,11 @@ public sealed class Backend
             done["cancel"] = new JsonObject { ["requested_at_ms"] = cancelAt, ["ack_ms"] = elapsed - cancelAt };
         }
         if (error is not null) done["error"] = ToJson(error);
+        if (streamer.TruncatedRows > 0)
+        {
+            // Reported loss only: rows past the post-cancel overflow cap.
+            done["truncated_rows"] = streamer.TruncatedRows;
+        }
         Log.Info($"query {run.QueryId} {status} after {elapsed} ms");
         try
         {
