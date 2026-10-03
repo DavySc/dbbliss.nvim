@@ -1,13 +1,13 @@
 # dbbliss.nvim
 
-A Neovim-native database client for SQL Server, PostgreSQL and DB2 for i, built for reliability:
+A Neovim-native database client for SQL Server and PostgreSQL, built for reliability:
 protocol-level cancel, no lost results, no surprise commits.
 
 The plugin (Lua, Neovim 0.10+) talks to one persistent .NET 10 backend process over
 line-delimited JSON-RPC on stdio.
 
 > **Status: Phase 0 (cancel spike).** Cancel works and is verified for PostgreSQL and SQL Server
-> on Linux. Windows and DB2 for i have not been run yet. See [docs/phase0-results.md](docs/phase0-results.md).
+> on Linux. Windows has not been run yet. DB2 for i is deferred. See [docs/phase0-results.md](docs/phase0-results.md).
 
 ## Build the backend
 
@@ -27,7 +27,7 @@ scripts\build.ps1           # → bin\win-x64\dbbliss-backend.exe
 require('dbbliss').setup({
   connections = {
     local_pg = {
-      engine = 'postgres',              -- 'postgres' | 'sqlserver' | 'db2i'
+      engine = 'postgres',              -- 'postgres' | 'sqlserver' ('db2i' is deferred)
       env = 'dev',                      -- 'dev' | 'test' | 'prod'
       connection_string = 'Host=localhost;Port=5432;Username=me;Database=app',
       password = { env = 'APP_PG_PASSWORD' },   -- a reference; literal passwords are rejected
@@ -70,7 +70,7 @@ nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua
 ```
 
 The cancel suite drives the real backend (and a real headless Neovim for the "Neovim closed"
-scenarios) and checks the server from an independent connection. DB2 for i runs only when
-`DBBLISS_TEST_DB2I` is set; see [docs/db2i-checklist.md](docs/db2i-checklist.md).
+scenarios) and checks the server from an independent connection. DB2 for i (deferred) runs only
+when `DBBLISS_TEST_DB2I` is set; see [docs/db2i-checklist.md](docs/db2i-checklist.md).
 
 Decisions to review: [docs/phase0-decisions.md](docs/phase0-decisions.md).

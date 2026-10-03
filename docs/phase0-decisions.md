@@ -2,7 +2,7 @@
 
 1. **Npgsql cancel uses `NpgsqlCommand.Cancel()`, not a `CancellationToken`.** This deviates from
    the plan. Both send the same CancelRequest on the wire, but the token path does nothing while
-   rows are buffered (see bug 2 in phase0-results.md). All three engines now cancel the same way:
+   rows are buffered (see bug 2 in phase0-results.md). All engines now cancel the same way:
    an explicit driver call, re-sent until the query ends.
 2. **The protocol cancel is re-sent** 100, 250, 500 and 1000 ms after the first attempt, then every
    second. After 10 s without an acknowledgement the user gets a warning. The backend never
@@ -14,15 +14,19 @@
    and keeps its server session and transaction until it is reset.
 5. **One running operation per connection.** A second `execute` while one runs is an error
    (`connection_busy`), not a queue.
-6. **The backend never commits on its own.** `disconnect` with an open transaction is refused
-   unless the caller passes `rollback = true`. PostgreSQL `commit` on an aborted transaction is
+6. **The backend never commits on its own.** `disconnect` is refused while the server reports a
+   transaction (`active`, `aborted`, or `unknown` when the engine cannot ask), unless the caller
+   passes `rollback = true`. The Lua side then asks the user. PostgreSQL `commit` on an aborted transaction is
    refused (PG would silently roll back). On shutdown (Neovim exiting), open transactions are
    rolled back by closing the connection. Phase 1 will prompt before quitting with an open
    transaction.
-7. **The transaction state comes from the server after every statement.** SQL Server:
-   `@@TRANCOUNT`/`XACT_STATE()` (one extra round trip per statement). PostgreSQL: a `SELECT 1` probe
-   only when a transaction is open (it fails with 25P02 when aborted). DB2 for i: reports `unknown`
-   until a reliable probe is verified.
+7. **Transactions are plain SQL, and their state always comes from the server.** The engines send
+   `BEGIN`/`COMMIT`/`ROLLBACK` themselves and use no driver transaction objects, so a transaction
+   the user opens or ends by typing SQL is the same as one from `:Dbbliss begin`. The state is asked
+   after every statement and before every transaction call. SQL Server: `@@TRANCOUNT`/`XACT_STATE()`,
+   one extra round trip. PostgreSQL: set a transaction-local setting, then read it back. It survives
+   only inside a transaction block, and setting it fails with 25P02 in an aborted one. That is two
+   extra round trips per statement, with no errors or warnings in the server log.
 8. **A cancel does not cut off results.** The backend keeps reading until the driver reports the
    server's cancel, so everything the server produced is delivered. The cost is that a SQL Server
    streaming cancel takes ~200–350 ms instead of ~40 ms (buffered rows are drained).
@@ -45,3 +49,10 @@
     yet. The Windows SQL Server setup in particular needs checking on the first push.
 15. **Layout:** the backend is published to `bin/<rid>/dbbliss-backend[.exe]` inside the plugin
     directory, where the Lua side looks for it by default. `backend.cmd` overrides that.
+16. **DB2 for i is deferred.** The focus is SQL Server and PostgreSQL. The DB2 engine, its scenarios
+    and the manual checklist stay in the repository, unrun and outside the Phase 0 gate. It still
+    tracks transactions locally and reports `unknown` inside one.
+17. **Queries and transaction calls hold the connection until their report is written** (`query/done` or the
+    `transaction/*` response), so reports reach Lua in the order the server changed state.
+18. **Lua refuses `connect` for a name that is connected or connecting.** Disconnect first. Before,
+    the second session silently replaced the first, which stayed open.

@@ -27,3 +27,38 @@
 | sqlserver | nvim_quit | PASS | 53 ms | nvim exited=True backend exited=True server: session gone |
 | sqlserver | nvim_killed | PASS | 51 ms | nvim exited=True backend exited=True server: session gone |
 
+### Linux X64 — 2026-10-03 20:10 UTC
+
+| Engine | Scenario | Result | Server stopped after | Detail |
+|---|---|---|---|---|
+| postgres | sleep_cancel | PASS | 119 ms | cancel=cancel_sent done=cancelled ack=25ms server: state=idle wait=ClientRead query=SELECT current_setting('dbbliss.tx_probe', true) |
+| postgres | cancel_immediately | PASS | 99 ms | 20 rounds, all cancelled; worst server stop 99 ms |
+| postgres | batch_cancel_keeps_results | PASS | 125 ms | done=cancelled first_result_rows=1 server: state=idle wait=ClientRead query=SELECT current_setting('dbbliss.tx_probe', true) |
+| postgres | streaming_cancel | PASS | 255 ms | done=cancelled rows_before_cancel=184863 ack=212ms server: state=idle wait=ClientRead query=SELECT current_setting('dbbliss.tx_probe', true) |
+| postgres | streaming_cancel_stalled_client | PASS | 53 ms | done=cancelled server stopped while client stalled: yes server: state=idle wait=ClientRead query=SELECT generate_series(1, 100000000) AS n, repeat('x', 200)  |
+| postgres | tx_cancel | PASS | — | done=cancelled backend_tx=aborted/aborted server_tx=aborted rows_visible_before_rollback=0 after_rollback=0 server_after=none |
+| postgres | tx_typed_begin | PASS | — | after typed begin: backend=active server=active; plain disconnect: error 1003, server=active; api rollback: none, server=none |
+| postgres | tx_typed_commit_after_api_begin | PASS | — | begin=active typed_commit=none server=none begin_again=active commit=none server_after=none |
+| postgres | tx_aborted_commit_refused | PASS | — | begin=active after_error=aborted commit=error 1002 server=aborted rollback=none server_after=none |
+| postgres | backend_stdin_closed | PASS | 53 ms | backend exited=True server: state=idle wait=ClientRead query=SELECT pg_sleep(60) |
+| postgres | backend_sigterm | PASS | 64 ms | backend exited=True server: state=idle wait=ClientRead query=SELECT pg_sleep(60) |
+| postgres | backend_killed | PASS | 1930 ms | backend exited=True server: session gone |
+| postgres | backend_killed_no_conncheck | INFO | — | server kept running (expected): backend exited=True server: state=active wait=PgSleep query=SELECT pg_sleep(60) |
+| postgres | nvim_quit | PASS | 53 ms | nvim exited=True backend exited=True server: state=idle wait=ClientRead query=SELECT pg_sleep(60) |
+| postgres | nvim_killed | PASS | 52 ms | nvim exited=True backend exited=True server: state=idle wait=ClientRead query=SELECT pg_sleep(60) |
+| sqlserver | sleep_cancel | PASS | 65 ms | cancel=cancel_sent done=cancelled ack=23ms server: no request; session status=sleeping open_tx=0 |
+| sqlserver | cancel_immediately | PASS | 92 ms | 20 rounds, all cancelled; worst server stop 92 ms |
+| sqlserver | batch_cancel_keeps_results | PASS | 102 ms | done=cancelled first_result_rows=1 server: no request; session status=sleeping open_tx=0 |
+| sqlserver | streaming_cancel | PASS | 451 ms | done=cancelled rows_before_cancel=126598 ack=424ms server: no request; session status=sleeping open_tx=0 |
+| sqlserver | streaming_cancel_stalled_client | PASS | 107 ms | done=cancelled server stopped while client stalled: yes server: no request; session status=sleeping open_tx=0 |
+| sqlserver | tx_cancel | PASS | — | done=cancelled backend_tx=active/active server_tx=open rows_visible_before_rollback=n/a after_rollback=0 server_after=none |
+| sqlserver | tx_cancel_xact_abort | PASS | — | done=cancelled backend_tx=none/none server_tx=none rows_visible_before_rollback=n/a after_rollback=0 server_after=none |
+| sqlserver | tx_typed_begin | PASS | — | after typed begin: backend=active server=open; plain disconnect: error 1003, server=open; api rollback: none, server=none |
+| sqlserver | tx_typed_commit_after_api_begin | PASS | — | begin=active typed_commit=none server=none begin_again=active commit=none server_after=none |
+| sqlserver | tx_aborted_commit_refused | PASS | — | begin=active after_error=none commit=error -32602 server=none rollback=none server_after=none |
+| sqlserver | backend_stdin_closed | PASS | 53 ms | backend exited=True server: no request; session status=sleeping open_tx=0 |
+| sqlserver | backend_sigterm | PASS | 57 ms | backend exited=True server: no request; session status=sleeping open_tx=0 |
+| sqlserver | backend_killed | PASS | 116 ms | backend exited=True server: session gone |
+| sqlserver | nvim_quit | PASS | 52 ms | nvim exited=True backend exited=True server: no request; session status=sleeping open_tx=0 |
+| sqlserver | nvim_killed | PASS | 52 ms | nvim exited=True backend exited=True server: no request; session status=sleeping open_tx=0 |
+

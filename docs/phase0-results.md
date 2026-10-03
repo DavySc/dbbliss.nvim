@@ -7,25 +7,29 @@ statement executing. Raw output of the recorded run: [phase0-results-linux.md](p
 
 Recorded on Linux x64 (EndeavourOS, kernel 7.2), .NET 10.0.401 SDK, Neovim 0.13-dev,
 PostgreSQL 17.11 and SQL Server 2022 (16.0.4295.3) in Docker. 24 scenarios, 0 failures, stable
-across 3 consecutive full runs.
+across 3 consecutive full runs. Re-run on 2026-10-03 after the transaction fixes (below): 30
+scenarios, 0 failures.
 
 ## Results by engine and platform
 
-| Scenario | PG · Linux | PG · Windows | MSSQL · Linux | MSSQL · Windows | DB2 for i · Linux | DB2 for i · Windows |
-|---|---|---|---|---|---|---|
-| Long query cancelled (`sleep_cancel`) | ✅ 30 ms | not run | ✅ 33 ms | not run | not run | not run |
-| Cancel right after execute, 20× (`cancel_immediately`) | ✅ ≤ 151 ms | not run | ✅ ≤ 129 ms | not run | not run | not run |
-| Earlier batch results survive the cancel (`batch_cancel_keeps_results`) | ✅ | not run | ✅ | not run | n/a | n/a |
-| Cancel during row streaming (`streaming_cancel`) | ✅ 110 ms | not run | ✅ 367 ms | not run | not run | not run |
-| Cancel during streaming, Neovim not reading (`streaming_cancel_stalled_client`) | ✅ 57 ms | not run | ✅ 53 ms | not run | not run | not run |
-| Cancel inside an open transaction (`tx_cancel`) | ✅ tx → aborted | not run | ✅ tx stays active | not run | not run | not run |
-| Same, `XACT_ABORT ON` (`tx_cancel_xact_abort`) | n/a | n/a | ✅ tx rolled back by server | not run | n/a | n/a |
-| Neovim `:qa!` mid-query (`nvim_quit`) | ✅ 51 ms | not run | ✅ 53 ms | not run | not run | not run |
-| Neovim killed mid-query (`nvim_killed`) | ✅ 52 ms | not run | ✅ 51 ms | not run | not run | not run |
-| Backend stdin closed (`backend_stdin_closed`) | ✅ 54 ms | not run | ✅ 53 ms | not run | not run | not run |
-| Backend SIGTERM (`backend_sigterm`) | ✅ 62 ms | n/a | ✅ 54 ms | n/a | not run | n/a |
-| Backend killed hard (`backend_killed`) | ✅ 1.9 s ¹ | not run | ✅ 92 ms | not run | not run | not run |
-| Control: killed, no connection check (`backend_killed_no_conncheck`) | ℹ️ keeps running ² | not run | n/a | n/a | n/a | n/a |
+| Scenario | PG · Linux | PG · Windows | MSSQL · Linux | MSSQL · Windows |
+|---|---|---|---|---|
+| Long query cancelled (`sleep_cancel`) | ✅ 30 ms | not run | ✅ 33 ms | not run |
+| Cancel right after execute, 20× (`cancel_immediately`) | ✅ ≤ 151 ms | not run | ✅ ≤ 129 ms | not run |
+| Earlier batch results survive the cancel (`batch_cancel_keeps_results`) | ✅ | not run | ✅ | not run |
+| Cancel during row streaming (`streaming_cancel`) | ✅ 110 ms | not run | ✅ 367 ms | not run |
+| Cancel during streaming, Neovim not reading (`streaming_cancel_stalled_client`) | ✅ 57 ms | not run | ✅ 53 ms | not run |
+| Cancel inside an open transaction (`tx_cancel`) | ✅ tx → aborted | not run | ✅ tx stays active | not run |
+| Same, `XACT_ABORT ON` (`tx_cancel_xact_abort`) | n/a | n/a | ✅ tx rolled back by server | not run |
+| Neovim `:qa!` mid-query (`nvim_quit`) | ✅ 51 ms | not run | ✅ 53 ms | not run |
+| Neovim killed mid-query (`nvim_killed`) | ✅ 52 ms | not run | ✅ 51 ms | not run |
+| Backend stdin closed (`backend_stdin_closed`) | ✅ 54 ms | not run | ✅ 53 ms | not run |
+| Backend SIGTERM (`backend_sigterm`) | ✅ 62 ms | n/a | ✅ 54 ms | n/a |
+| Backend killed hard (`backend_killed`) | ✅ 1.9 s ¹ | not run | ✅ 92 ms | not run |
+| Control: killed, no connection check (`backend_killed_no_conncheck`) | ℹ️ keeps running ² | not run | n/a | n/a |
+| Typed `BEGIN` seen, blocks a plain disconnect, API rollback ends it (`tx_typed_begin`) | ✅ | not run | ✅ | not run |
+| API `begin`, typed `COMMIT`, then `begin` again (`tx_typed_commit_after_api_begin`) | ✅ | not run | ✅ | not run |
+| Commit refused after an error, rollback works (`tx_aborted_commit_refused`) | ✅ tx → aborted | not run | ✅ tx rolled back by server | not run |
 
 ¹ Through `client_connection_check_interval = 2000`, which the backend sets on every PostgreSQL
 session (PG 14+). The server notices the dead client within one interval.
@@ -37,9 +41,8 @@ server does not support the setting; the backend then warns at connect.
 and the CI job (`.github/workflows/ci.yml`) are written for Windows, but none of them has been run
 there yet. Windows is the primary platform, so this is the first thing to do before Phase 1.
 
-**DB2 for i: not run.** No IBM i system was available. The engine and its scenarios are written but
-unverified. Per the plan, Phase 1 does not start until [db2i-checklist.md](db2i-checklist.md) has
-been worked through on a real system. If DB2 for i cancel turns out to be unreliable, stop there.
+**DB2 for i: deferred** (decision 16). It is no longer part of the Phase 0 gate. The engine, its
+scenarios and [db2i-checklist.md](db2i-checklist.md) stay in the repository, unrun.
 
 ## Transaction state after a cancel
 
@@ -47,8 +50,7 @@ been worked through on a real system. If DB2 for i cancel turns out to be unreli
 |---|---|---|---|
 | PostgreSQL | `idle in transaction (aborted)` | `aborted` (probed, and confirmed by the observer) | Only `ROLLBACK` works. The backend refuses `commit`: PostgreSQL would silently turn it into a rollback. |
 | SQL Server, `XACT_ABORT OFF` (default) | transaction still open, `XACT_STATE() = 1` | `active` | The statement is cancelled; earlier work in the transaction is kept. |
-| SQL Server, `XACT_ABORT ON` | transaction rolled back by the server | `none` | The Lua side raises an error: "the server ended the transaction". |
-| DB2 for i | unverified | `unknown` (no server probe yet) | See checklist. |
+| SQL Server, `XACT_ABORT ON` | transaction rolled back by the server | `none` | The Lua side raises an error: "the server rolled back the transaction". |
 
 In every case the uncommitted insert was gone after rollback: nothing was committed by surprise.
 
@@ -70,3 +72,19 @@ In every case the uncommitted insert was gone after rollback: nothing was commit
    is on the wire. The backend re-sends the protocol cancel at 100, 250, 500 and 1000 ms, then every
    second, until the query ends (`cancel_immediately`; the worst case was 1009 ms before the faster
    schedule).
+
+## Bugs found after the spike (all fixed, all now tests)
+
+Found by the formal models in [spec/](../spec/README.md) and by the real drivers. Details are in
+spec/README.md.
+
+5. **A `BEGIN` typed as SQL was invisible on PostgreSQL**, and on both engines a plain `disconnect`
+   then closed the session, silently rolling the transaction back (`tx_typed_begin`).
+6. **API `begin` then typed `COMMIT` broke PostgreSQL transactions on that connection.** Npgsql
+   kept its `NpgsqlTransaction` object. The probe then failed (`unknown`), and every later `begin`
+   was refused (`tx_typed_commit_after_api_begin`).
+7. **A stale transaction report could arrive last.** The connection was released before
+   `query/done` was written, so a rollback could report first and Lua then showed `active`
+   (Dbbliss.ProtocolTests).
+8. **Connecting a name twice orphaned the first session** with its transaction and locks
+   (tests/nvim/client_test.lua).
