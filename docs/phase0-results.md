@@ -31,7 +31,7 @@ auth). 30 scenarios, 0 failures.
 | Backend SIGTERM (`backend_sigterm`) | ✅ 62 ms | n/a | ✅ 54 ms | n/a |
 | Backend killed hard (`backend_killed`) | ✅ 1.9 s ¹ | ℹ️ keeps running ³ | ✅ 92 ms | ✅ 6 ms |
 | Control: killed, no connection check (`backend_killed_no_conncheck`) | ℹ️ keeps running ² | ℹ️ keeps running ³ | n/a | n/a |
-| Orphan of a hard-killed backend ended on next connect (`backend_killed_orphan_swept`) | ✅ 0.5 s | see CI | n/a | n/a |
+| Orphan of a hard-killed backend ended on next connect (`backend_killed_orphan_swept`) | ✅ 0.5 s | ✅ 0.5 s | n/a | n/a |
 | Typed `BEGIN` seen, blocks a plain disconnect, API rollback ends it (`tx_typed_begin`) | ✅ | ✅ | ✅ | ✅ |
 | API `begin`, typed `COMMIT`, then `begin` again (`tx_typed_commit_after_api_begin`) | ✅ | ✅ | ✅ | ✅ |
 | Commit refused after an error, rollback works (`tx_aborted_commit_refused`) | ✅ tx → aborted | ✅ tx → aborted | ✅ tx rolled back by server | ✅ tx rolled back by server |
