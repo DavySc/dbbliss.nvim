@@ -10,36 +10,49 @@ PostgreSQL 17.11 and SQL Server 2022 (16.0.4295.3) in Docker. 24 scenarios, 0 fa
 across 3 consecutive full runs. Re-run on 2026-10-03 after the transaction fixes (below): 30
 scenarios, 0 failures.
 
+Windows: GitHub Actions `windows-latest` (x64), 2026-10-06, [run 37501919527](https://github.com/DavySc/dbbliss.nvim/actions/runs/37501919527),
+with the runner's preinstalled PostgreSQL (running on Windows) and SQL Server Express (integrated
+auth). 30 scenarios, 0 failures.
+
 ## Results by engine and platform
 
 | Scenario | PG · Linux | PG · Windows | MSSQL · Linux | MSSQL · Windows |
 |---|---|---|---|---|
-| Long query cancelled (`sleep_cancel`) | ✅ 30 ms | not run | ✅ 33 ms | not run |
-| Cancel right after execute, 20× (`cancel_immediately`) | ✅ ≤ 151 ms | not run | ✅ ≤ 129 ms | not run |
-| Earlier batch results survive the cancel (`batch_cancel_keeps_results`) | ✅ | not run | ✅ | not run |
-| Cancel during row streaming (`streaming_cancel`) | ✅ 110 ms | not run | ✅ 367 ms | not run |
-| Cancel during streaming, Neovim not reading (`streaming_cancel_stalled_client`) | ✅ 57 ms | not run | ✅ 53 ms | not run |
-| Cancel inside an open transaction (`tx_cancel`) | ✅ tx → aborted | not run | ✅ tx stays active | not run |
-| Same, `XACT_ABORT ON` (`tx_cancel_xact_abort`) | n/a | n/a | ✅ tx rolled back by server | not run |
-| Neovim `:qa!` mid-query (`nvim_quit`) | ✅ 51 ms | not run | ✅ 53 ms | not run |
-| Neovim killed mid-query (`nvim_killed`) | ✅ 52 ms | not run | ✅ 51 ms | not run |
-| Backend stdin closed (`backend_stdin_closed`) | ✅ 54 ms | not run | ✅ 53 ms | not run |
+| Long query cancelled (`sleep_cancel`) | ✅ 30 ms | ✅ 171 ms | ✅ 33 ms | ✅ 47 ms |
+| Cancel right after execute, 20× (`cancel_immediately`) | ✅ ≤ 151 ms | ✅ ≤ 121 ms | ✅ ≤ 129 ms | ✅ ≤ 65 ms |
+| Earlier batch results survive the cancel (`batch_cancel_keeps_results`) | ✅ | ✅ | ✅ | ✅ |
+| Cancel during row streaming (`streaming_cancel`) | ✅ 110 ms | ✅ 103 ms | ✅ 367 ms | ✅ 31 ms |
+| Cancel during streaming, Neovim not reading (`streaming_cancel_stalled_client`) | ✅ 57 ms | ✅ 64 ms | ✅ 53 ms | ✅ 64 ms |
+| Cancel inside an open transaction (`tx_cancel`) | ✅ tx → aborted | ✅ tx → aborted | ✅ tx stays active | ✅ tx stays active |
+| Same, `XACT_ABORT ON` (`tx_cancel_xact_abort`) | n/a | n/a | ✅ tx rolled back by server | ✅ tx rolled back by server |
+| Neovim `:qa!` mid-query (`nvim_quit`) | ✅ 51 ms | ✅ 123 ms | ✅ 53 ms | ✅ 103 ms |
+| Neovim killed mid-query (`nvim_killed`) | ✅ 52 ms | ✅ 55 ms | ✅ 51 ms | ✅ 57 ms |
+| Backend stdin closed (`backend_stdin_closed`) | ✅ 54 ms | ✅ 53 ms | ✅ 53 ms | ✅ 57 ms |
 | Backend SIGTERM (`backend_sigterm`) | ✅ 62 ms | n/a | ✅ 54 ms | n/a |
-| Backend killed hard (`backend_killed`) | ✅ 1.9 s ¹ | not run | ✅ 92 ms | not run |
-| Control: killed, no connection check (`backend_killed_no_conncheck`) | ℹ️ keeps running ² | not run | n/a | n/a |
-| Typed `BEGIN` seen, blocks a plain disconnect, API rollback ends it (`tx_typed_begin`) | ✅ | not run | ✅ | not run |
-| API `begin`, typed `COMMIT`, then `begin` again (`tx_typed_commit_after_api_begin`) | ✅ | not run | ✅ | not run |
-| Commit refused after an error, rollback works (`tx_aborted_commit_refused`) | ✅ tx → aborted | not run | ✅ tx rolled back by server | not run |
+| Backend killed hard (`backend_killed`) | ✅ 1.9 s ¹ | ℹ️ keeps running ³ | ✅ 92 ms | ✅ 6 ms |
+| Control: killed, no connection check (`backend_killed_no_conncheck`) | ℹ️ keeps running ² | ℹ️ keeps running ³ | n/a | n/a |
+| Typed `BEGIN` seen, blocks a plain disconnect, API rollback ends it (`tx_typed_begin`) | ✅ | ✅ | ✅ | ✅ |
+| API `begin`, typed `COMMIT`, then `begin` again (`tx_typed_commit_after_api_begin`) | ✅ | ✅ | ✅ | ✅ |
+| Commit refused after an error, rollback works (`tx_aborted_commit_refused`) | ✅ tx → aborted | ✅ tx → aborted | ✅ tx rolled back by server | ✅ tx rolled back by server |
 
 ¹ Through `client_connection_check_interval = 2000`, which the backend sets on every PostgreSQL
 session (PG 14+). The server notices the dead client within one interval.
 ² Without that setting, `pg_sleep(60)` keeps running for its full minute after the client died.
 This is PostgreSQL behaviour. It is why the setting is on by default. A Windows-hosted PostgreSQL
 server does not support the setting; the backend then warns at connect.
+³ A limitation of PostgreSQL running on Windows, not of the client. After a hard kill
+(TerminateProcess) the backend cannot act, and the server cannot enable `client_connection_check_interval`, so
+`pg_sleep(60)` runs to the end. The scenario checks that the backend warned at connect and reports
+INFO (decision 19). A Windows client talking to a PostgreSQL server on Linux is not affected.
 
-**Windows: not run.** This machine is Linux only. The suite, the build script (`scripts/build.ps1`)
-and the CI job (`.github/workflows/ci.yml`) are written for Windows, but none of them has been run
-there yet. Windows is the primary platform, so this is the first thing to do before Phase 1.
+**Windows not covered yet:** the CI databases run natively on Windows, not in Docker Desktop or
+Rancher Desktop as the plan describes. No interactive use on a real Windows desktop has been
+tried either.
+
+**Windows bug found by the first run (fixed):** a killed Neovim took the backend down with it,
+before it could cancel (`nvim_killed`, PostgreSQL). libuv on Windows puts every child process in a
+job object that is killed when Neovim exits. The plugin now starts the backend detached on Windows
+(decision 20).
 
 **DB2 for i: deferred** (decision 16). It is no longer part of the Phase 0 gate. The engine, its
 scenarios and [db2i-checklist.md](db2i-checklist.md) stay in the repository, unrun.

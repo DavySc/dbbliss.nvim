@@ -56,3 +56,12 @@
     `transaction/*` response), so reports reach Lua in the order the server changed state.
 18. **Lua refuses `connect` for a name that is connected or connecting.** Disconnect first. Before,
     the second session silently replaced the first, which stayed open.
+19. **A PostgreSQL server on Windows cannot stop a query whose client was killed hard.** It has
+    no `client_connection_check_interval`. The backend warns at connect, and `backend_killed`
+    reports INFO instead of FAIL. The only client-side remedy would be a separate watchdog process
+    that holds the cancel keys and sends a CancelRequest when the backend dies. That is not built.
+    Say if you want it.
+20. **On Windows the backend is started detached** (`vim.system{ detach = true }`). Otherwise
+    libuv's job object kills it hard when Neovim exits or is killed, before it can cancel its
+    queries. Detached, it shuts down on stdin EOF. Its own shutdown is bounded at about 5 s plus
+    5 s per connection, so it cannot linger.

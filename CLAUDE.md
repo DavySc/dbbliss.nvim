@@ -6,16 +6,17 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 ## Status (2026-10-03)
 
-**Phase 0 (cancel spike): done on Linux, Windows not run.** Phases 1–6 have not started.
-Stop for the user's review at the end of each phase.
+**Phase 0 (cancel spike): complete on Linux and Windows, awaiting the user's review.** Phases
+1–6 have not started. Stop for the user's review at the end of each phase.
 
-- All 30 real-database scenarios pass on Linux against PostgreSQL 17 and SQL Server 2022 in Docker.
-  Results: `docs/phase0-results.md`. Decisions for the user to review: `docs/phase0-decisions.md` (1–18).
-- **The only open Phase 0 item is Windows.** The Windows build script (`scripts/build.ps1`), the
-  Windows CI job, and its database setup (runner's PostgreSQL and SQL Server Express) are written
-  but have never run.
+- All 30 real-database scenarios pass on Linux (PostgreSQL 17 and SQL Server 2022 in Docker) and on
+  Windows (CI: native PostgreSQL and SQL Server Express). Results: `docs/phase0-results.md`.
+  Decisions for the user to review: `docs/phase0-decisions.md` (1–20).
+- Windows gaps: Docker Desktop or Rancher Desktop on Windows is untested, and so is interactive use
+  on a real Windows desktop.
 - **On GitHub** as `git@github.com:DavySc/dbbliss.nvim.git` (`origin`), first pushed 2026-10-06.
-  `gh` is not installed, so CI results have to be read on github.com (or install `gh`).
+  `gh` is installed and logged in. CI (`.github/workflows/ci.yml`) runs every test suite on
+  `windows-latest` and `ubuntu-latest` on every push.
 - **DB2 for i is deferred** (decision 16). Its engine, scenarios and `docs/db2i-checklist.md` stay
   in the repo, unrun. Don't work on it unless the user brings it back, and don't delete it without asking.
 - Formal models in `spec/` (TLA+ query lifecycle, Quint client/transactions) found four bugs after

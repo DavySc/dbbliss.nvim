@@ -6,8 +6,8 @@ protocol-level cancel, no lost results, no surprise commits.
 The plugin (Lua, Neovim 0.10+) talks to one persistent .NET 10 backend process over
 line-delimited JSON-RPC on stdio.
 
-> **Status: Phase 0 (cancel spike).** Cancel works and is verified for PostgreSQL and SQL Server
-> on Linux. Windows has not been run yet. DB2 for i is deferred. See [docs/phase0-results.md](docs/phase0-results.md).
+> **Status: Phase 0 (cancel spike) complete, awaiting review.** Cancel works and is verified for PostgreSQL and SQL Server
+> on Linux and Windows. DB2 for i is deferred. See [docs/phase0-results.md](docs/phase0-results.md).
 
 ## Build the backend
 
