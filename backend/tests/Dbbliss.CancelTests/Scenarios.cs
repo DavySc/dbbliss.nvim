@@ -46,6 +46,7 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
                     c => { c.Kill(); return Task.CompletedTask; }, new JsonObject { ["pg_client_connection_check_interval_ms"] = 0 });
                 return r with { Outcome = Outcome.Info, Detail = (r.ServerStopMs is null ? "server kept running (expected): " : "server stopped: ") + r.Detail };
             });
+            yield return ("backend_killed_orphan_swept", OrphanSwept);
         }
         yield return ("nvim_quit", () => NvimDeath("nvim_quit", kill: false));
         yield return ("nvim_killed", () => NvimDeath("nvim_killed", kill: true));
@@ -54,9 +55,11 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
     private ScenarioResult Result(string scenario, Outcome o, string detail, long? stopMs = null) =>
         new(profile.Engine, scenario, o, detail, stopMs);
 
-    private async Task<(BackendClient Client, string ConnectionId, string Session)> StartAsync(JsonObject? options = null)
+    private async Task<(BackendClient Client, string ConnectionId, string Session)> StartAsync(JsonObject? options = null, string? stateDir = null)
     {
-        var client = BackendClient.Start(settings.BackendPath, BackendEnv);
+        var env = BackendEnv;
+        if (stateDir is not null) env["DBBLISS_STATE_DIR"] = stateDir;
+        var client = BackendClient.Start(settings.BackendPath, env);
         await client.RequestAsync("initialize");
         var conn = await client.RequestAsync("connect", new JsonObject
         {
@@ -416,9 +419,79 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
             // does not support. Nothing on our side can stop the query, so the requirement is that
             // the user was told at connect.
             return Result(name, Outcome.Info,
-                "server kept running: it cannot detect a dead client (no client_connection_check_interval); the backend warned at connect. " + detail);
+                "server kept running: it cannot detect a dead client (no client_connection_check_interval); the backend warned at connect, " +
+                "and the next connect ends the session (backend_killed_orphan_swept). " + detail);
         }
         return Result(name, stopMs is not null && exited ? Outcome.Pass : Outcome.Fail, detail, stopMs);
+    }
+
+    /// <summary>
+    /// Decision 19: a backend killed hard leaves its query running when the server cannot detect the
+    /// dead client (a Windows PostgreSQL server; here reproduced by turning the connection check off).
+    /// The next backend's connect must end that session and say so.
+    /// </summary>
+    private async Task<ScenarioResult> OrphanSwept()
+    {
+        const string name = "backend_killed_orphan_swept";
+        var stateDir = Directory.CreateTempSubdirectory("dbbliss-state-");
+        try
+        {
+            await using var observer = await profile.OpenObserverAsync();
+            // A live backend on the same machine: the sweep must leave its running query alone.
+            var (live, connLive, sessionLive) = await StartAsync(stateDir: stateDir.FullName);
+            await using var _live = live;
+            await Execute(live, connLive, "live", profile.SleepSql);
+            await WaitExecutingAsync(observer, sessionLive);
+            var (a, connA, sessionA) = await StartAsync(new JsonObject { ["pg_client_connection_check_interval_ms"] = 0 }, stateDir.FullName);
+            await using (a)
+            {
+                await Execute(a, connA, "q", profile.SleepSql);
+                await WaitExecutingAsync(observer, sessionA);
+                a.Kill();
+                await a.WaitExitAsync(10000);
+            }
+            await Task.Delay(500);
+            var before = await profile.ViewAsync(observer, sessionA);
+            if (!before.Executing) return Result(name, Outcome.Fail, "precondition failed, the query stopped without the sweep: " + before.Detail);
+
+            var sw = Stopwatch.StartNew();
+            var (b, _, _) = await StartAsync(stateDir: stateDir.FullName);
+            await using var _ = b;
+            string? warning = null;
+            try
+            {
+                var n = await b.WaitNotificationAsync(m => m["method"]?.GetValue<string>() == "connection/message"
+                    && (m["params"]?["text"]?.GetValue<string>() ?? "").Contains($"pid {sessionA},", StringComparison.Ordinal), 5000);
+                warning = n["params"]!["text"]!.GetValue<string>();
+            }
+            catch (TimeoutException)
+            {
+            }
+            ServerView view;
+            do
+            {
+                view = await profile.ViewAsync(observer, sessionA);
+                if (view.Detail == "session gone") break;
+                await Task.Delay(50);
+            }
+            while (sw.ElapsedMilliseconds < ServerStopTimeoutMs);
+            var gone = view.Detail == "session gone";
+            var liveView = await profile.ViewAsync(observer, sessionLive);
+            var ok = gone && warning is not null && liveView.Executing;
+            return Result(name, ok ? Outcome.Pass : Outcome.Fail,
+                $"orphan {(gone ? "ended" : "still there: " + view.Detail)}; live backend's query {(liveView.Executing ? "untouched" : "WRONGLY ENDED: " + liveView.Detail)}; " +
+                $"user told: {warning ?? "nothing"}", gone ? sw.ElapsedMilliseconds : null);
+        }
+        finally
+        {
+            try
+            {
+                stateDir.Delete(recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
     }
 
     private static async Task<bool> WarnedNoConnectionCheckAsync(BackendClient c)

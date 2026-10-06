@@ -11,7 +11,8 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 - All 30 real-database scenarios pass on Linux (PostgreSQL 17 and SQL Server 2022 in Docker) and on
   Windows (CI: native PostgreSQL and SQL Server Express). Results: `docs/phase0-results.md`.
-  Decisions for the user to review: `docs/phase0-decisions.md` (1–20).
+  Decisions for the user to review: `docs/phase0-decisions.md` (1–21).
+- A PostgreSQL session left by a hard-killed backend is ended on the next connect (decisions 19, 21).
 - Windows gaps: Docker Desktop or Rancher Desktop on Windows is untested, and so is interactive use
   on a real Windows desktop.
 - **On GitHub** as `git@github.com:DavySc/dbbliss.nvim.git` (`origin`), first pushed 2026-10-06.
@@ -38,6 +39,9 @@ Not yet built for Phase 1:
   apps, no xUnit (decision 12).
 - Transactions are plain `BEGIN`/`COMMIT`/`ROLLBACK` SQL sent by the engines, with no driver
   transaction objects. Every transaction decision asks the server first (decision 7).
+- PostgreSQL sessions are tagged `application_name = "dbbliss.nvim <instance id>"`, and backends
+  register in `<LocalAppData>/dbbliss/instances` (`Instances.cs`). The orphan sweep relies on
+  both. Never sweep a session that isn't provably from a dead instance on this machine.
 - A connection's lease is released under the output lock, right before the operation's report
   (`query/done` or the response) is written: not earlier (stale reports), not later (spurious
   busy). See `Output.WriteAsync(message, ordered)` and decision 17.

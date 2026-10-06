@@ -31,6 +31,7 @@ auth). 30 scenarios, 0 failures.
 | Backend SIGTERM (`backend_sigterm`) | ✅ 62 ms | n/a | ✅ 54 ms | n/a |
 | Backend killed hard (`backend_killed`) | ✅ 1.9 s ¹ | ℹ️ keeps running ³ | ✅ 92 ms | ✅ 6 ms |
 | Control: killed, no connection check (`backend_killed_no_conncheck`) | ℹ️ keeps running ² | ℹ️ keeps running ³ | n/a | n/a |
+| Orphan of a hard-killed backend ended on next connect (`backend_killed_orphan_swept`) | ✅ 0.5 s | see CI | n/a | n/a |
 | Typed `BEGIN` seen, blocks a plain disconnect, API rollback ends it (`tx_typed_begin`) | ✅ | ✅ | ✅ | ✅ |
 | API `begin`, typed `COMMIT`, then `begin` again (`tx_typed_commit_after_api_begin`) | ✅ | ✅ | ✅ | ✅ |
 | Commit refused after an error, rollback works (`tx_aborted_commit_refused`) | ✅ tx → aborted | ✅ tx → aborted | ✅ tx rolled back by server | ✅ tx rolled back by server |
@@ -42,8 +43,10 @@ This is PostgreSQL behaviour. It is why the setting is on by default. A Windows-
 server does not support the setting; the backend then warns at connect.
 ³ A limitation of PostgreSQL running on Windows, not of the client. After a hard kill
 (TerminateProcess) the backend cannot act, and the server cannot enable `client_connection_check_interval`, so
-`pg_sleep(60)` runs to the end. The scenario checks that the backend warned at connect and reports
-INFO (decision 19). A Windows client talking to a PostgreSQL server on Linux is not affected.
+`pg_sleep(60)` keeps running. The scenario checks that the backend warned at connect and reports
+INFO. The next connect to that server ends the orphaned session and tells the user
+(`backend_killed_orphan_swept`, decision 19). A Windows client talking to a PostgreSQL server on Linux
+is not affected.
 
 **Windows not covered yet:** the CI databases run natively on Windows, not in Docker Desktop or
 Rancher Desktop as the plan describes. No interactive use on a real Windows desktop has been

@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Dbbliss.Backend;
 using Dbbliss.Backend.Rpc;
 using Dbbliss.ProtocolTests;
 
@@ -21,6 +22,8 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("no_stale_report_after_rollback", "2: HonestTxView", NoStaleReportAfterRollback),
     ("execute_right_after_query_done", "lease released too late", ExecuteRightAfterQueryDone),
     ("execute_right_after_transaction_call", "lease released too late", ExecuteRightAfterTransactionCall),
+    ("instances_dead_ids", "", InstancesDeadIds),
+    ("instances_prune", "", InstancesPrune),
 };
 
 var failed = 0;
@@ -156,6 +159,60 @@ static async Task ExecuteRightAfterTransactionCall()
     h.Stdout.Release();
     var response = await next;
     if (response["error"] is not null) throw new TestFailure($"execute right after the begin response was refused: {response["error"]!.ToJsonString()}");
+}
+
+// The registry that decides which sessions the orphan sweep may end (decision 19). A false "dead"
+// would terminate a live backend's session, so every way of being alive is checked.
+static Task InstancesDeadIds()
+{
+    var dir = Directory.CreateTempSubdirectory("dbbliss-instances-");
+    try
+    {
+        var instancesDir = Path.Combine(dir.FullName, "instances");
+        using var self = System.Diagnostics.Process.GetCurrentProcess();
+        var selfStart = self.StartTime.ToUniversalTime();
+        const int NoSuchPid = 0x7FFFFFF0;
+        Instances.Write(instancesDir, "gone", NoSuchPid, DateTime.UtcNow);
+        Instances.Write(instancesDir, "alive", self.Id, selfStart);
+        Instances.Write(instancesDir, "reused", self.Id, selfStart.AddHours(-1));
+        Instances.Write(instancesDir, "me", NoSuchPid, DateTime.UtcNow);
+        File.WriteAllText(Path.Combine(instancesDir, "garbage.json"), "{ not json");
+
+        var dead = new Instances(dir.FullName, id: "me").DeadIds();
+        var expected = new HashSet<string> { "gone", "reused" };
+        if (!dead.SetEquals(expected)) throw new TestFailure($"dead ids: {string.Join(",", dead.Order())}, expected gone,reused");
+        return Task.CompletedTask;
+    }
+    finally
+    {
+        dir.Delete(recursive: true);
+    }
+}
+
+static Task InstancesPrune()
+{
+    var dir = Directory.CreateTempSubdirectory("dbbliss-instances-");
+    try
+    {
+        var instancesDir = Path.Combine(dir.FullName, "instances");
+        using var self = System.Diagnostics.Process.GetCurrentProcess();
+        const int NoSuchPid = 0x7FFFFFF0;
+        Instances.Write(instancesDir, "old_dead", NoSuchPid, DateTime.UtcNow);
+        Instances.Write(instancesDir, "new_dead", NoSuchPid, DateTime.UtcNow);
+        Instances.Write(instancesDir, "old_alive", self.Id, self.StartTime.ToUniversalTime());
+        var old = DateTime.UtcNow - Instances.KeepDead - TimeSpan.FromDays(1);
+        File.SetLastWriteTimeUtc(Path.Combine(instancesDir, "old_dead.json"), old);
+        File.SetLastWriteTimeUtc(Path.Combine(instancesDir, "old_alive.json"), old);
+
+        new Instances(dir.FullName).Prune();
+        var left = Directory.GetFiles(instancesDir).Select(Path.GetFileNameWithoutExtension).Order().ToArray();
+        if (!left.SequenceEqual(["new_dead", "old_alive"])) throw new TestFailure($"left after prune: {string.Join(",", left)}");
+        return Task.CompletedTask;
+    }
+    finally
+    {
+        dir.Delete(recursive: true);
+    }
 }
 
 static void ExpectError(JsonObject response, int code, string what)

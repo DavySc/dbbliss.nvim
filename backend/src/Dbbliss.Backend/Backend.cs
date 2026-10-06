@@ -37,8 +37,8 @@ public sealed class Backend
     private int _shuttingDown;
     private int _nextConnection;
 
-    public Backend(Output output)
-        : this(output, [new SqlServerEngine(), new PostgresEngine(), new Db2iEngine()])
+    public Backend(Output output, Instances instances)
+        : this(output, [new SqlServerEngine(), new PostgresEngine(instances), new Db2iEngine()])
     {
     }
 

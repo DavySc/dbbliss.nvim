@@ -13,7 +13,11 @@ var stdin = Console.OpenStandardInput();
 // Nothing may write to stdout except the protocol writer; stray Console.Write goes to stderr.
 Console.SetOut(Console.Error);
 
-var backend = new Backend(new Output(stdout));
+// Registered so a later backend can end this one's sessions if it is killed hard (decision 19).
+var instances = new Instances(Instances.DefaultStateDir());
+instances.Register();
+instances.Prune();
+var backend = new Backend(new Output(stdout), instances);
 
 // Graceful paths besides stdin EOF: SIGTERM/SIGINT/SIGHUP on Linux; on Windows these map to
 // console close/Ctrl+C events. A hard kill (SIGKILL, TerminateProcess) cannot be intercepted.
@@ -36,6 +40,7 @@ foreach (var signal in new[] { PosixSignal.SIGTERM, PosixSignal.SIGINT, PosixSig
 Log.Info($"dbbliss-backend started, pid {Environment.ProcessId}");
 _ = Task.Run(() => backend.RunAsync(stdin));
 await backend.Completion;
+instances.Unregister();
 Log.Info("dbbliss-backend exiting");
 foreach (var r in registrations) r.Dispose();
 return 0;

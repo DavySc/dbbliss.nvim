@@ -60,12 +60,30 @@
     by CI, now `execute_right_after_*` in Dbbliss.ProtocolTests).
 18. **Lua refuses `connect` for a name that is connected or connecting.** Disconnect first. Before,
     the second session silently replaced the first, which stayed open.
-19. **A PostgreSQL server on Windows cannot stop a query whose client was killed hard.** It has
-    no `client_connection_check_interval`. The backend warns at connect, and `backend_killed`
-    reports INFO instead of FAIL. The only client-side remedy would be a separate watchdog process
-    that holds the cancel keys and sends a CancelRequest when the backend dies. That is not built.
-    Say if you want it.
+19. **Sessions left by a hard-killed backend are ended on the next connect** (PostgreSQL). After a
+    hard kill the backend cannot cancel. Only the server can notice the dead client, through
+    `client_connection_check_interval`, and a PostgreSQL server on Windows lacks it, so the query
+    would run to its end and a transaction keep its locks.
+    - **pgAdmin as the reference:** it does nothing here, and its desktop app even ends its own
+      server with a hard kill on quit. It tags sessions (`application_name = "pgAdmin 4 - <conn id>"`)
+      and leaves cleanup to the user in its Dashboard (`pg_cancel_backend` / `pg_terminate_backend`).
+    - **dbbliss does the same tagging and terminate, automatically.** Every connect looks for
+      sessions of backends on this machine that died (decision 21) and ends them with
+      `pg_terminate_backend`. That is what the server would do if it could detect the dead client:
+      the statement stops and an open transaction rolls back. A warning tells the user what was
+      ended (pid, state, query).
+    - **What remains:** the orphan runs until the next connect to that server. A watchdog process
+      would close that window and is not built. The connect warning about the missing setting
+      stays. A session whose user set their own `application_name` cannot be swept.
 20. **On Windows the backend is started detached** (`vim.system{ detach = true }`). Otherwise
     libuv's job object kills it hard when Neovim exits or is killed, before it can cancel its
     queries. Detached, it shuts down on stdin EOF. Its own shutdown is bounded at about 5 s plus
     5 s per connection, so it cannot linger.
+21. **Backend instances register in a state dir** (`%LOCALAPPDATA%\dbbliss\instances` or
+    `~/.local/share/dbbliss/instances`, override `DBBLISS_STATE_DIR`). Each instance writes one file
+    with its pid and process start time, and deletes it on a clean exit. PostgreSQL sessions get
+    `application_name = "dbbliss.nvim <instance id>"`.
+    - **Dead:** the pid is gone, or now belongs to a process started at a different time (pid reuse).
+    - **Never dead:** a file that can't be read, or a process whose start time can't be read.
+    - Only sessions of dead instances from this machine are ever swept. Dead files are kept 7 days,
+      because their orphans may sit on several servers.
