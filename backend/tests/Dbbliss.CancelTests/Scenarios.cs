@@ -409,7 +409,31 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
         var (stopMs, view) = await WaitStoppedAsync(observer, session, sw);
         var exited = await c.WaitExitAsync(10000);
         var detail = $"backend exited={exited} server: {view.Detail}";
+        if (stopMs is null && exited && profile.Engine == "postgres" && await WarnedNoConnectionCheckAsync(c))
+        {
+            // A hard kill gives the backend no chance to cancel. Only the server can notice the dead
+            // client, through client_connection_check_interval, which a PostgreSQL server on Windows
+            // does not support. Nothing on our side can stop the query, so the requirement is that
+            // the user was told at connect.
+            return Result(name, Outcome.Info,
+                "server kept running: it cannot detect a dead client (no client_connection_check_interval); the backend warned at connect. " + detail);
+        }
         return Result(name, stopMs is not null && exited ? Outcome.Pass : Outcome.Fail, detail, stopMs);
+    }
+
+    private static async Task<bool> WarnedNoConnectionCheckAsync(BackendClient c)
+    {
+        try
+        {
+            await c.WaitNotificationAsync(n => n["method"]?.GetValue<string>() == "connection/message"
+                && n["params"]?["severity"]?.GetValue<string>() == "warning"
+                && (n["params"]?["text"]?.GetValue<string>() ?? "").Contains("client_connection_check_interval", StringComparison.Ordinal), 1000);
+            return true;
+        }
+        catch (TimeoutException)
+        {
+            return false;
+        }
     }
 
     private Task<ScenarioResult> BackendSigterm()

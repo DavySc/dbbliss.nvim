@@ -55,6 +55,10 @@ function Backend:start()
   end
   local log = io.open(log_path(), 'a')
   self.proc = vim.system(self.cmd, {
+    -- Windows: libuv puts every non-detached child in a job object that kills it the moment
+    -- Neovim exits, so a killed Neovim took the backend down hard, before it could cancel its
+    -- queries (nvim_killed). Detached, it sees stdin close and shuts down cleanly, as on Linux.
+    detach = vim.fn.has('win32') == 1,
     stdin = true,
     text = false,
     stdout = function(err, data)
