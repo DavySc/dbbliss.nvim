@@ -52,8 +52,12 @@
 16. **DB2 for i is deferred.** The focus is SQL Server and PostgreSQL. The DB2 engine, its scenarios
     and the manual checklist stay in the repository, unrun and outside the Phase 0 gate. It still
     tracks transactions locally and reports `unknown` inside one.
-17. **Queries and transaction calls hold the connection until their report is written** (`query/done` or the
-    `transaction/*` response), so reports reach Lua in the order the server changed state.
+17. **Queries and transaction calls hold the connection until their report has its place in the
+    output** (`query/done` or the `transaction/*` response). The connection is released under the
+    output lock, just before the report is written. Reports therefore reach Lua in the order the
+    server changed state, and a request sent the moment Lua reads the report finds the connection
+    free. Releasing after the write, as first done, made a fast next `execute` fail as busy (found
+    by CI, now `execute_right_after_*` in Dbbliss.ProtocolTests).
 18. **Lua refuses `connect` for a name that is connected or connecting.** Disconnect first. Before,
     the second session silently replaced the first, which stayed open.
 19. **A PostgreSQL server on Windows cannot stop a query whose client was killed hard.** It has

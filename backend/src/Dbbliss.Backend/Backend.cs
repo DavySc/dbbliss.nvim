@@ -93,12 +93,20 @@ public sealed class Backend
             var method = request["method"]?.GetValue<string>() ?? throw new RpcException(RpcErrors.InvalidRequest, "Missing method.");
             var @params = request["params"] as JsonObject ?? [];
 
-            var (result, after) = await DispatchAsync(method, @params);
-            if (id is not null)
+            var reply = await DispatchAsync(method, @params);
+            try
             {
-                await _output.WriteAsync(new JsonObject { ["id"] = id, ["result"] = result });
+                if (id is not null)
+                {
+                    await _output.WriteAsync(new JsonObject { ["id"] = id, ["result"] = reply.Result }, reply.Ordered);
+                }
             }
-            after?.Invoke();
+            finally
+            {
+                // No response to write, or the write failed: run it anyway. Ordered actions are idempotent.
+                reply.Ordered?.Invoke();
+            }
+            reply.After?.Invoke();
         }
         catch (Exception ex) when (ex is not IOException)
         {
@@ -127,7 +135,12 @@ public sealed class Backend
         }
     }
 
-    private async Task<(JsonNode? Result, Action? After)> DispatchAsync(string method, JsonObject p)
+    /// <param name="Ordered">Runs once the response's place in the output is fixed, before it is written
+    /// (see <see cref="Output.WriteAsync(JsonObject, Action?, CancellationToken)"/>). Must be idempotent.</param>
+    /// <param name="After">Runs after the response is written.</param>
+    private readonly record struct Reply(JsonNode? Result, Action? Ordered = null, Action? After = null);
+
+    private async Task<Reply> DispatchAsync(string method, JsonObject p)
     {
         if (Volatile.Read(ref _shuttingDown) != 0 && method != "shutdown")
         {
@@ -135,16 +148,16 @@ public sealed class Backend
         }
         return method switch
         {
-            "initialize" => (Initialize(), null),
-            "connect" => (await ConnectAsync(p), null),
-            "disconnect" => (await DisconnectAsync(p), null),
+            "initialize" => new Reply(Initialize()),
+            "connect" => new Reply(await ConnectAsync(p)),
+            "disconnect" => new Reply(await DisconnectAsync(p)),
             "execute" => Execute(p),
-            "cancel" => (Cancel(p), null),
+            "cancel" => new Reply(Cancel(p)),
             "transaction/begin" => await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)),
             "transaction/commit" => await TransactionAsync(p, (s, ct) => s.CommitAsync(ct)),
             "transaction/rollback" => await TransactionAsync(p, (s, ct) => s.RollbackAsync(ct)),
             "transaction/status" => await TransactionStatusAsync(p),
-            "shutdown" => (new JsonObject(), () => _ = ShutdownAsync("shutdown requested")),
+            "shutdown" => new Reply(new JsonObject(), After: () => _ = ShutdownAsync("shutdown requested")),
             _ => throw new RpcException(RpcErrors.MethodNotFound, $"Unknown method {method}."),
         };
     }
@@ -207,7 +220,7 @@ public sealed class Backend
         }
     }
 
-    private (JsonNode, Action) Execute(JsonObject p)
+    private Reply Execute(JsonObject p)
     {
         var connection = GetConnection(p);
         var sql = Str(p, "sql");
@@ -222,7 +235,7 @@ public sealed class Backend
         }
         // The query starts after the response is written, so the client always sees the
         // query id before any notification about it.
-        return (new JsonObject { ["query_id"] = queryId }, () => run.Task = RunQueryAsync(run, sql, lease));
+        return new Reply(new JsonObject { ["query_id"] = queryId }, After: () => run.Task = RunQueryAsync(run, sql, lease));
     }
 
     private async Task RunQueryAsync(QueryRun run, string sql, IDisposable lease)
@@ -283,18 +296,28 @@ public sealed class Backend
             done["truncated_rows"] = streamer.TruncatedRows;
         }
         Log.Info($"query {run.QueryId} {status} after {elapsed} ms");
+        var released = false;
+        void Release()
+        {
+            if (released) return;
+            released = true;
+            lease.Dispose();
+            _queries.TryRemove(run.QueryId, out _);
+            control.Dispose();
+        }
         try
         {
-            await _output.NotifyAsync("query/done", done);
+            // The connection is released once query/done holds its place in the output. Released
+            // earlier, an operation that takes the connection next could report first, and the client's
+            // last transaction report would be this stale one (spec/quint/client.qnt, LeaseAfterWrite).
+            // Released after the write, a client sending its next request on reading query/done could
+            // find the connection still busy.
+            await _output.NotifyAsync("query/done", done, Release);
         }
         catch (IOException)
         {
         }
-        // Only now: an operation that takes the connection next must report after this query/done,
-        // or the client's last transaction report would be this stale one (spec/quint/client.qnt, LeaseAfterWrite).
-        lease.Dispose();
-        _queries.TryRemove(run.QueryId, out _);
-        control.Dispose();
+        Release();
     }
 
     /// <summary>Asks the server for the transaction state after every statement, so a server-side
@@ -375,16 +398,16 @@ public sealed class Backend
     }
 
     /// <summary>
-    /// Runs a transaction call under the connection's lease and keeps the lease until the response is
-    /// written: the returned action, which <see cref="HandleLineAsync"/> runs after the write, releases it.
+    /// Runs a transaction call under the connection's lease and keeps the lease until the response holds
+    /// its place in the output, for the same reason as query/done in <see cref="RunQueryAsync"/>.
     /// </summary>
-    private static async Task<(JsonNode, Action)> UnderLeaseAsync(Connection connection, Func<Task<JsonObject>> call)
+    private static async Task<Reply> UnderLeaseAsync(Connection connection, Func<Task<JsonObject>> call)
     {
         var lease = connection.TryAcquire()
             ?? throw new RpcException(RpcErrors.ConnectionBusy, $"Connection {connection.Id} is running a query.");
         try
         {
-            return (await call(), lease.Dispose);
+            return new Reply(await call(), Ordered: lease.Dispose);
         }
         catch
         {
@@ -393,13 +416,13 @@ public sealed class Backend
         }
     }
 
-    private Task<(JsonNode, Action)> TransactionAsync(JsonObject p, Func<IEngineSession, CancellationToken, Task> action)
+    private Task<Reply> TransactionAsync(JsonObject p, Func<IEngineSession, CancellationToken, Task> action)
     {
         var connection = GetConnection(p);
         return UnderLeaseAsync(connection, () => TransactionAsync(connection, action));
     }
 
-    private Task<(JsonNode, Action)> TransactionStatusAsync(JsonObject p)
+    private Task<Reply> TransactionStatusAsync(JsonObject p)
     {
         var connection = GetConnection(p);
         return UnderLeaseAsync(connection, async () => new JsonObject { ["transaction"] = await ProbeTransactionAsync(connection) });

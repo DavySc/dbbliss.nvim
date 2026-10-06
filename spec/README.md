@@ -62,7 +62,9 @@ tests that failed before the fix (see [Tests](#tests)):
    response. A later operation on the same connection can then run and report first, and the
    stale report arrives last: Lua shows `active` after a `rollback` that worked. The window is
    narrow, because the overtaking operation needs a server round trip. The fix is to release the lease
-   after the write.
+   once the report holds the output lock, just before it is written. Releasing it after the write,
+   as first done, has the opposite race: a client that sends its next request on reading the report
+   finds the connection busy. The model treats the write as one step, so it does not see that race.
 3. **Connecting a name twice orphans a session** (`LuaById`). `M.connect` overwrites
    `state.connections[name]`. The old session stays open in the backend, with its transaction and
    locks, until the backend exits. Callbacks also find their connection by name (`query/done`,

@@ -38,8 +38,9 @@ Not yet built for Phase 1:
   apps, no xUnit (decision 12).
 - Transactions are plain `BEGIN`/`COMMIT`/`ROLLBACK` SQL sent by the engines, with no driver
   transaction objects. Every transaction decision asks the server first (decision 7).
-- A connection's lease is held until the operation's report (`query/done` or the response) is
-  written (decision 17).
+- A connection's lease is released under the output lock, right before the operation's report
+  (`query/done` or the response) is written: not earlier (stale reports), not later (spurious
+  busy). See `Output.WriteAsync(message, ordered)` and decision 17.
 - A new design that involves concurrency or transactions should be checked against the models in
   `spec/`. Every variant except `Proposed` must fail; `spec/check.sh` checks that (~3 min).
 

@@ -19,6 +19,8 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("shutdown_closes_every_session", "", ShutdownClosesEverySession),
     ("typed_begin_blocks_disconnect", "1: NoSilentRollback", TypedBeginBlocksDisconnect),
     ("no_stale_report_after_rollback", "2: HonestTxView", NoStaleReportAfterRollback),
+    ("execute_right_after_query_done", "lease released too late", ExecuteRightAfterQueryDone),
+    ("execute_right_after_transaction_call", "lease released too late", ExecuteRightAfterTransactionCall),
 };
 
 var failed = 0;
@@ -121,6 +123,39 @@ static async Task NoStaleReportAfterRollback()
     var view = ClientView.Transactions(h.Messages, new Dictionary<int, string> { [rollbackId] = c }, new Dictionary<string, string> { ["q1"] = c });
     var server = h.Server.Open.Values.Single().State.ToString().ToLowerInvariant();
     if (view[c] != server) throw new TestFailure($"the client's last report says {view[c]}, the server has {server}");
+}
+
+// A client may send its next request the moment it reads query/done. The connection must be free
+// by then. Hold the backend inside the query/done write, send execute, then let the write finish.
+static async Task ExecuteRightAfterQueryDone()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    var held = h.Stdout.Arm("\"query/done\"");
+    await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q1", ["sql"] = "SELECT 1" });
+    await held.WaitAsync(TimeSpan.FromSeconds(5));
+    await h.NotificationAsync("query/done", "q1");
+    var next = h.CallAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q2", ["sql"] = "SELECT 1" });
+    await Task.Delay(200); // the request is read and dispatched while the write is held
+    h.Stdout.Release();
+    var response = await next;
+    if (response["error"] is not null) throw new TestFailure($"execute right after query/done was refused: {response["error"]!.ToJsonString()}");
+}
+
+// The same for the response to a transaction call.
+static async Task ExecuteRightAfterTransactionCall()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    var held = h.Stdout.Arm("\"transaction\":\"active\"");
+    var beginId = h.Send("transaction/begin", new JsonObject { ["connection_id"] = c });
+    await held.WaitAsync(TimeSpan.FromSeconds(5));
+    await h.WaitForAsync(m => m["id"]?.GetValue<int>() == beginId, "response to transaction/begin");
+    var next = h.CallAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q1", ["sql"] = "SELECT 1" });
+    await Task.Delay(200);
+    h.Stdout.Release();
+    var response = await next;
+    if (response["error"] is not null) throw new TestFailure($"execute right after the begin response was refused: {response["error"]!.ToJsonString()}");
 }
 
 static void ExpectError(JsonObject response, int code, string what)

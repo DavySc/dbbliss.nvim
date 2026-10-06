@@ -28,11 +28,14 @@ public sealed class Harness : IAsyncDisposable
 
     public Backend.Backend Backend { get; }
 
+    /// <summary>The backend's stdout. Can hold the backend right after it has written a chosen message.</summary>
+    public HoldingStream Stdout { get; }
+
     public Harness()
     {
         var backendIn = new AnonymousPipeClientStream(PipeDirection.In, _stdin.ClientSafePipeHandle);
-        var backendOut = new AnonymousPipeClientStream(PipeDirection.Out, _stdout.ClientSafePipeHandle);
-        Backend = new Backend.Backend(new Output(backendOut), [new FakeEngine(Server)]);
+        Stdout = new HoldingStream(new AnonymousPipeClientStream(PipeDirection.Out, _stdout.ClientSafePipeHandle));
+        Backend = new Backend.Backend(new Output(Stdout), [new FakeEngine(Server)]);
         _writer = new StreamWriter(_stdin, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
         _run = Task.Run(() => Backend.RunAsync(backendIn));
         _read = Task.Run(ReadLoopAsync);
@@ -208,5 +211,68 @@ public sealed class StderrGate : TextWriter
     public override void Write(char value)
     {
         if (_echo) _original.Write(value);
+    }
+}
+
+/// <summary>
+/// Passes everything through. When armed, the flush that completes a message containing the given
+/// text reaches the reader and then does not return until <see cref="Release"/>: the backend has
+/// written the message (the client can act on it) but is still inside that write.
+/// </summary>
+public sealed class HoldingStream(Stream inner) : Stream
+{
+    private readonly MemoryStream _pending = new();
+    private string? _armed;
+    private TaskCompletionSource? _reached;
+    private TaskCompletionSource? _release;
+
+    public Task Arm(string text)
+    {
+        _reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Volatile.Write(ref _armed, text);
+        return _reached.Task;
+    }
+
+    public void Release() => _release?.TrySetResult();
+
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+    {
+        lock (_pending) _pending.Write(buffer.Span);
+        await inner.WriteAsync(buffer, ct);
+    }
+
+    public override async Task FlushAsync(CancellationToken ct)
+    {
+        await inner.FlushAsync(ct);
+        string written;
+        lock (_pending)
+        {
+            written = Encoding.UTF8.GetString(_pending.GetBuffer(), 0, (int)_pending.Length);
+            _pending.SetLength(0);
+        }
+        if (Volatile.Read(ref _armed) is { } armed && written.Contains(armed, StringComparison.Ordinal))
+        {
+            Volatile.Write(ref _armed, null);
+            _reached!.TrySetResult();
+            await _release!.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+    }
+
+    public override void Write(byte[] buffer, int offset, int count) => WriteAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+    public override void Flush() => FlushAsync(CancellationToken.None).GetAwaiter().GetResult();
+    public override bool CanRead => false;
+    public override bool CanSeek => false;
+    public override bool CanWrite => true;
+    public override long Length => throw new NotSupportedException();
+    public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+    public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) inner.Dispose();
+        base.Dispose(disposing);
     }
 }
