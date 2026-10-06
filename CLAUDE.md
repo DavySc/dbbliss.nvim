@@ -14,10 +14,8 @@ Stop for the user's review at the end of each phase.
 - **The only open Phase 0 item is Windows.** The Windows build script (`scripts/build.ps1`), the
   Windows CI job, and its database setup (runner's PostgreSQL and SQL Server Express) are written
   but have never run.
-- **Not on GitHub yet.** There is no git remote, so CI has never run. SSH to GitHub works (account
-  `DavySc`), `gh` is not installed, and `DavySc/dbbliss.nvim` does not exist. Before pushing, ask the
-  user how to create the repo (they create it at github.com/new, or install `gh`) and whether it
-  is private or public. That question was asked but not answered.
+- **On GitHub** as `git@github.com:DavySc/dbbliss.nvim.git` (`origin`), first pushed 2026-10-06.
+  `gh` is not installed, so CI results have to be read on github.com (or install `gh`).
 - **DB2 for i is deferred** (decision 16). Its engine, scenarios and `docs/db2i-checklist.md` stay
   in the repo, unrun. Don't work on it unless the user brings it back, and don't delete it without asking.
 - Formal models in `spec/` (TLA+ query lifecycle, Quint client/transactions) found four bugs after
