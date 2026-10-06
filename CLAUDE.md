@@ -8,6 +8,8 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 **Phase 0 (cancel spike): complete on Linux and Windows, awaiting the user's review.** Phases
 1–6 have not started. Stop for the user's review at the end of each phase.
+**Next steps are in `docs/phase1-plan.md`:** the user reviews Phase 0 first, then Phase 1 milestones M1–M5.
+Don't start Phase 1 code before the user says the review is done.
 
 - All 30 real-database scenarios pass on Linux (PostgreSQL 17 and SQL Server 2022 in Docker) and on
   Windows (CI: native PostgreSQL and SQL Server Express). Results: `docs/phase0-results.md`.
