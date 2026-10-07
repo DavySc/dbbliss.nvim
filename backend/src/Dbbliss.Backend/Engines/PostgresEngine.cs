@@ -125,9 +125,9 @@ public sealed class PostgresEngine(Instances? instances = null) : IEngine
         var pg = ex as PostgresException ?? ex.InnerException as PostgresException;
         if (pg is not null)
         {
-            // Position is a 1-based character offset into the statement; Phase 1 maps it to a line.
+            // Position is a 1-based character offset into the statement; the backend maps it to a line.
             return new ErrorInfo(pg.MessageText, Code: pg.SqlState, SqlState: pg.SqlState,
-                Line: pg.Position > 0 ? pg.Position : null, Severity: pg.Severity);
+                Severity: pg.Severity, Position: pg.Position > 0 ? pg.Position : null);
         }
         return new ErrorInfo(ex.Message);
     }

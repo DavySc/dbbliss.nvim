@@ -5,12 +5,14 @@
 --
 -- Exits 1 if any test fails.
 
-local stub = { requests = {} }
+local stub = { requests = {}, handlers = {} }
 
 package.loaded['dbbliss.backend'] = {
   new = function()
     local b = { exited = false, pid = 0 }
-    function b:on() end
+    function b:on(method, fn)
+      stub.handlers[method] = fn
+    end
     function b:on_exit() end
     function b:start() end
     function b:shutdown_sync()
@@ -71,6 +73,9 @@ local function reset()
   dbbliss._state.connections = {}
   dbbliss._state.current = nil
   dbbliss._state.backend = nil
+  dbbliss._state.queries = {}
+  dbbliss._state.scripts = {}
+  stub.handlers = {}
   stub.requests = {}
   stub.open = {}
   stub.server_tx = {}
@@ -88,6 +93,48 @@ local function check_no_orphan()
     if not known[id] then
       error(('backend connection %s is open but the client no longer knows it (orphaned session)'):format(id), 0)
     end
+  end
+end
+
+--- Removes and returns the oldest unanswered request for `method`, without answering it.
+local function take(method)
+  for i, r in ipairs(stub.requests) do
+    if r.method == method then
+      table.remove(stub.requests, i)
+      return r
+    end
+  end
+end
+
+local function stmt(text, line, repeat_n)
+  return { text = text, start = { line = line, col = 0 }, ['end'] = { line = line, col = #text }, ['repeat'] = repeat_n or 1 }
+end
+
+--- A fresh buffer holding `lines`, current, with a connection open.
+local function script_setup(lines)
+  local b = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_set_current_buf(b)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
+  dbbliss.connect('a')
+  answer_all()
+  return b
+end
+
+--- The backend accepts the oldest execute, then reports how it ended.
+local function finish_query(done)
+  local r = take('execute')
+  if not r then
+    error('no execute request was sent', 0)
+  end
+  r.cb(nil, { query_id = r.params.query_id })
+  done = vim.tbl_extend('force', { query_id = r.params.query_id, status = 'completed', elapsed_ms = 1, transaction = 'none' }, done or {})
+  stub.handlers['query/done'](done)
+  return r
+end
+
+local function expect(cond, msg)
+  if not cond then
+    error(msg, 0)
   end
 end
 
@@ -142,6 +189,98 @@ local tests = {
       dbbliss.connect('a')
       answer_all()
       check_no_orphan()
+    end,
+  },
+  {
+    'pick_statement_under_cursor',
+    '',
+    function()
+      local script = require('dbbliss.script')
+      local a, b = stmt('select 1;', 0), stmt('select 2;', 2)
+      expect(script.pick({ a, b }, 0, 3) == a, 'cursor inside the first statement')
+      expect(script.pick({ a, b }, 1, 0) == a, 'a blank line picks the statement above')
+      expect(script.pick({ a, b }, 2, 0) == b, 'the start of the second statement')
+      expect(script.pick({ a, b }, 9, 0) == b, 'below the last statement picks the last')
+      expect(script.pick({ { text = 'x', start = { line = 5, col = 0 } } }, 0, 0).text == 'x', 'above the first picks the first')
+      expect(script.pick({}, 0, 0) == nil, 'no statements')
+    end,
+  },
+  {
+    'run_buffer_stops_at_first_error',
+    '',
+    function()
+      local b = script_setup({ 'select 1;', 'select 2;', 'select 3;' })
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0), stmt('select 2;', 1), stmt('select 3;', 2) } })
+      expect(finish_query().params.line_offset == 0, 'first statement starts on buffer line 0')
+      local second = finish_query({ status = 'error', error = { message = 'boom', line = 1, buffer_line = 2 } })
+      expect(second.params.line_offset == 1, 'second statement starts on buffer line 1')
+      expect(take('execute') == nil, 'a statement was sent after the failed one')
+      expect(next(dbbliss._state.scripts) == nil, 'the script is still marked as running')
+      local diagnostics = vim.diagnostic.get(b)
+      expect(#diagnostics == 1 and diagnostics[1].lnum == 1, 'the error line was not marked in the source buffer')
+    end,
+  },
+  {
+    'run_repeats_a_go_count',
+    '',
+    function()
+      script_setup({ 'select 1', 'go 2' })
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { stmt('select 1', 0, 2) } })
+      finish_query()
+      finish_query()
+      expect(take('execute') == nil, 'more than two executions for GO 2')
+      expect(next(dbbliss._state.scripts) == nil, 'the script is still marked as running')
+    end,
+  },
+  {
+    'run_statement_under_cursor',
+    '',
+    function()
+      script_setup({ 'select 1;', 'select 2;', 'select 3;' })
+      vim.api.nvim_win_set_cursor(0, { 2, 3 })
+      dbbliss.run('statement')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0), stmt('select 2;', 1), stmt('select 3;', 2) } })
+      local r = finish_query()
+      expect(r.params.sql == 'select 2;' and r.params.line_offset == 1, 'expected the second statement, got ' .. tostring(r.params.sql))
+      expect(take('execute') == nil, 'more than the one statement under the cursor was run')
+    end,
+  },
+  {
+    'run_range_offsets_by_its_first_line',
+    '',
+    function()
+      script_setup({ 'select 1;', 'select 2;', 'select 3;', 'select 4;' })
+      dbbliss.run('range', { 2, 3 })
+      local split = take('script/split')
+      expect(split.params.text == 'select 2;\nselect 3;', 'the split text is the range only: ' .. tostring(split.params.text))
+      split.cb(nil, { statements = { stmt('select 2;', 0), stmt('select 3;', 1) } })
+      expect(finish_query().params.line_offset == 1, 'first statement of the range is buffer line 1')
+      expect(finish_query().params.line_offset == 2, 'second statement of the range is buffer line 2')
+    end,
+  },
+  {
+    'run_refused_while_a_script_runs',
+    '',
+    function()
+      script_setup({ 'select 1;' })
+      dbbliss.run('buffer')
+      dbbliss.run('buffer')
+      expect(take('script/split') ~= nil, 'the first run sent no split request')
+      expect(take('script/split') == nil, 'a second script was started while the first runs')
+    end,
+  },
+  {
+    'run_not_started_ends_the_script',
+    '',
+    function()
+      script_setup({ 'select 1;', 'select 2;' })
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0), stmt('select 2;', 1) } })
+      take('execute').cb({ code = 1002, message = 'busy' }, nil)
+      expect(take('execute') == nil, 'the next statement was sent after one was refused')
+      expect(next(dbbliss._state.scripts) == nil, 'the script is still marked as running')
     end,
   },
 }

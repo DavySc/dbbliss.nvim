@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Dbbliss.Backend.Scripts;
 
 namespace Dbbliss.Backend.Engines;
 
@@ -7,13 +8,19 @@ public interface IEngine
 {
     string Name { get; }
 
+    /// <summary>How scripts for this engine split into the units sent to the server one at a time.</summary>
+    ScriptDialect Dialect => ScriptDialect.Semicolon;
+
     Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct);
 
     /// <summary>Extracts code, SQLSTATE, severity and line number from a driver exception.</summary>
     ErrorInfo DescribeError(Exception ex);
 }
 
-public sealed record ErrorInfo(string Message, string? Code = null, string? SqlState = null, int? Line = null, string? Severity = null);
+/// <param name="Line">1-based line within the statement sent, when the engine reports one.</param>
+/// <param name="Position">1-based character offset within the statement sent, when the engine reports
+/// that instead of a line (PostgreSQL). The backend turns it into a line.</param>
+public sealed record ErrorInfo(string Message, string? Code = null, string? SqlState = null, int? Line = null, string? Severity = null, int? Position = null);
 
 public sealed record ConnectionSpec(string ConnectionString, string? Password, JsonObject? Options);
 

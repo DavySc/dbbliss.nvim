@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dbbliss.Backend.Engines;
 using Dbbliss.Backend.Rpc;
+using Dbbliss.Backend.Scripts;
 
 namespace Dbbliss.Backend;
 
@@ -151,6 +152,7 @@ public sealed class Backend
             "initialize" => new Reply(Initialize()),
             "connect" => new Reply(await ConnectAsync(p)),
             "disconnect" => new Reply(await DisconnectAsync(p)),
+            "script/split" => new Reply(SplitScript(p)),
             "execute" => Execute(p),
             "cancel" => new Reply(Cancel(p)),
             "transaction/begin" => await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)),
@@ -220,14 +222,41 @@ public sealed class Backend
         }
     }
 
+    /// <summary>
+    /// Splits a script into the units the server is sent one at a time. Needs no connection, only the
+    /// engine, whose dialect decides where units end. Lines and columns are 0-based.
+    /// </summary>
+    private JsonObject SplitScript(JsonObject p)
+    {
+        var engineName = Str(p, "engine");
+        if (!_engines.TryGetValue(engineName, out var engine))
+        {
+            throw new RpcException(RpcErrors.InvalidParams, $"Unknown engine {engineName}. Known: {string.Join(", ", _engines.Keys)}.");
+        }
+        var text = p["text"]?.GetValue<string>() ?? throw new RpcException(RpcErrors.InvalidParams, "Missing parameter text.");
+        var statements = new JsonArray();
+        foreach (var unit in ScriptSplitter.Split(text, engine.Dialect))
+        {
+            statements.Add(new JsonObject
+            {
+                ["text"] = unit.Text,
+                ["start"] = new JsonObject { ["line"] = unit.Start.Line, ["col"] = unit.Start.Column },
+                ["end"] = new JsonObject { ["line"] = unit.End.Line, ["col"] = unit.End.Column },
+                ["repeat"] = unit.Repeat,
+            });
+        }
+        return new JsonObject { ["statements"] = statements };
+    }
+
     private Reply Execute(JsonObject p)
     {
         var connection = GetConnection(p);
         var sql = Str(p, "sql");
+        var lineOffset = p["line_offset"]?.GetValue<int>() ?? 0;
         var queryId = p["query_id"]?.GetValue<string>() ?? Guid.NewGuid().ToString("N");
         var lease = connection.TryAcquire()
             ?? throw new RpcException(RpcErrors.ConnectionBusy, $"Connection {connection.Id} is already running a query.");
-        var run = new QueryRun(queryId, connection, new QueryControl(queryId));
+        var run = new QueryRun(queryId, connection, new QueryControl(queryId), lineOffset);
         if (!_queries.TryAdd(queryId, run))
         {
             lease.Dispose();
@@ -261,7 +290,7 @@ public sealed class Backend
             status = control.CancelRequested ? "cancelled" : "error";
             if (!(control.CancelRequested && ex is OperationCanceledException))
             {
-                error = connection.Engine.DescribeError(ex);
+                error = LocateError(connection.Engine.DescribeError(ex), sql);
             }
         }
         control.MarkFinished();
@@ -289,7 +318,14 @@ public sealed class Backend
         {
             done["cancel"] = new JsonObject { ["requested_at_ms"] = cancelAt, ["ack_ms"] = elapsed - cancelAt };
         }
-        if (error is not null) done["error"] = ToJson(error);
+        if (error is not null)
+        {
+            var json = ToJson(error);
+            // Where the error is in the buffer the statement came from: the statement's first line plus
+            // the engine's line, both counted from 1 here.
+            if (error.Line is { } line) json["buffer_line"] = run.LineOffset + line;
+            done["error"] = json;
+        }
         if (streamer.TruncatedRows > 0)
         {
             // Reported loss only: rows past the post-cancel overflow cap.
@@ -490,6 +526,7 @@ public sealed class Backend
         ["code"] = e.Code,
         ["sqlstate"] = e.SqlState,
         ["line"] = e.Line,
+        ["position"] = e.Position,
         ["severity"] = e.Severity,
     };
 
@@ -506,8 +543,26 @@ public sealed class Backend
             ? s
             : throw new RpcException(RpcErrors.InvalidParams, $"Missing parameter {name}.");
 
-    private sealed class QueryRun(string queryId, Connection connection, QueryControl control)
+    /// <summary>
+    /// Gives an error a line within the statement sent. SQL Server reports one; PostgreSQL reports a
+    /// character offset, which is converted here (an offset counts characters, not UTF-16 units).
+    /// </summary>
+    private static ErrorInfo LocateError(ErrorInfo error, string sql)
     {
+        if (error.Line is not null || error.Position is not { } position) return error;
+        var line = 1;
+        var characters = 0;
+        for (var i = 0; i < sql.Length && characters < position - 1; i++)
+        {
+            if (sql[i] == '\n') line++;
+            if (!char.IsLowSurrogate(sql[i])) characters++;
+        }
+        return error with { Line = line };
+    }
+
+    private sealed class QueryRun(string queryId, Connection connection, QueryControl control, int lineOffset)
+    {
+        public int LineOffset { get; } = lineOffset;
         public string QueryId { get; } = queryId;
         public Connection Connection { get; } = connection;
         public QueryControl Control { get; } = control;

@@ -46,11 +46,19 @@ require('dbbliss').setup({
 | Command | |
 |---|---|
 | `:Dbbliss connect <name>` | open a connection; it becomes current |
-| `:[range]Dbbliss exec` | run the range (default: whole buffer) |
-| `:Dbbliss cancel` | cancel the running query (protocol-level) |
+| `:Dbbliss exec` | run the statement under the cursor (SQL Server: the `GO` batch) |
+| `:{range}Dbbliss exec` | run every statement in the lines of the range, e.g. a visual selection |
+| `:Dbbliss exec_all` | run the whole buffer, one statement at a time |
+| `:Dbbliss cancel` | cancel the running query (protocol-level); the rest of a script is not run |
 | `:Dbbliss begin` / `commit` / `rollback` | explicit transactions |
 | `:Dbbliss status` | connections, transaction state, running queries |
 | `:Dbbliss disconnect` | asks before rolling back an open transaction |
+
+A script stops at the first statement that does not complete and says which one it was; the
+statements after it are not run. The backend splits the text (`script/split`): PostgreSQL at
+semicolons, SQL Server at `GO` lines (`GO 5` repeats the batch), both aware of strings, comments,
+quoted identifiers and, on PostgreSQL, dollar quoting. An error is shown on its line in the buffer
+(as a diagnostic) as well as in the results.
 
 Results go to a minimal `dbbliss://results` buffer (Phase 1 replaces it). Backend diagnostics go to
 `stdpath('log')/dbbliss-backend.log`.

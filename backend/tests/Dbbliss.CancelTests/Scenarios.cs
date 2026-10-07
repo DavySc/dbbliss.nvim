@@ -22,6 +22,7 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
     {
         yield return ("sleep_cancel", () => CancelLongQuery("sleep_cancel", profile.SleepSql));
         foreach (var (name, sql) in profile.ExtraLongQueries) yield return (name, () => CancelLongQuery(name, sql));
+        yield return ("error_line_in_buffer", ErrorLineInBuffer);
         yield return ("cancel_immediately", CancelImmediately);
         if (profile.BatchThenSleepSql is not null) yield return ("batch_cancel_keeps_results", BatchCancelKeepsResults);
         yield return ("streaming_cancel", StreamingCancel);
@@ -291,6 +292,31 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
     }
 
     private static bool ServerHasTransaction(ServerView v) => v.TransactionState is "active" or "aborted" or "open";
+
+    /// <summary>
+    /// Phase 1 M1: a failing statement's error is reported on its line in the source buffer. The
+    /// statement starts on buffer line 10 (0-based) and fails on its second line, so the buffer line
+    /// is 12 (1-based). SQL Server reports a line; PostgreSQL a character offset the backend converts.
+    /// </summary>
+    private async Task<ScenarioResult> ErrorLineInBuffer()
+    {
+        const string name = "error_line_in_buffer";
+        var (c, connId, _) = await StartAsync();
+        await using var _c = c;
+        await c.RequestAsync("execute", new JsonObject
+        {
+            ["connection_id"] = connId,
+            ["query_id"] = "e1",
+            ["sql"] = "SELECT 1\nFROM dbbliss_no_such_table_m1",
+            ["line_offset"] = 10,
+        });
+        var done = (await c.WaitDoneAsync("e1", DoneTimeoutMs))["params"]!;
+        var error = done["error"];
+        var line = error?["line"]?.GetValue<int>();
+        var bufferLine = error?["buffer_line"]?.GetValue<int>();
+        var ok = done["status"]?.GetValue<string>() == "error" && line == 2 && bufferLine == 12;
+        return Result(name, ok ? Outcome.Pass : Outcome.Fail, $"status={done["status"]}, line={line}, buffer_line={bufferLine} (expected error, 2, 12)");
+    }
 
     private async Task<string?> RunToDoneAsync(BackendClient c, string connId, string queryId, string sql)
     {

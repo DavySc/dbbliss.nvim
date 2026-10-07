@@ -38,7 +38,8 @@ public sealed class FakeEngine(FakeServer server) : IEngine
     public Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct) =>
         Task.FromResult<IEngineSession>(server.OpenSession());
 
-    public ErrorInfo DescribeError(Exception ex) => new(ex.Message);
+    public ErrorInfo DescribeError(Exception ex) =>
+        ex is FakeServerException { Position: { } position } ? new ErrorInfo(ex.Message, Position: position) : new ErrorInfo(ex.Message);
 }
 
 /// <summary>
@@ -72,6 +73,13 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
                     if (State == ServerTx.Active) State = ServerTx.Aborted;
                     throw new FakeServerException("statement failed");
                 default:
+                    var at = sql.IndexOf("POSFAIL", StringComparison.Ordinal);
+                    if (at >= 0)
+                    {
+                        // Like PostgreSQL: the error carries a 1-based character offset, not a line.
+                        var position = sql[..at].EnumerateRunes().Count() + 1;
+                        throw new FakeServerException("syntax error", position);
+                    }
                     if (State == ServerTx.Aborted) throw new FakeServerException("current transaction is aborted");
                     break;
             }
@@ -129,4 +137,7 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
     }
 }
 
-public sealed class FakeServerException(string message) : Exception(message);
+public sealed class FakeServerException(string message, int? position = null) : Exception(message)
+{
+    public int? Position { get; } = position;
+}

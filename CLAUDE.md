@@ -6,10 +6,12 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 ## Status (2026-10-03)
 
-**Phase 0 (cancel spike): complete on Linux and Windows, awaiting the user's review.** Phases
-1–6 have not started. Stop for the user's review at the end of each phase.
-**Next steps are in `docs/phase1-plan.md`:** the user reviews Phase 0 first, then Phase 1 milestones M1–M5.
-Don't start Phase 1 code before the user says the review is done.
+**Phase 0 (cancel spike): complete on Linux and Windows, reviewed.** Phases
+2–6 have not started. Stop for the user's review at the end of each phase.
+**Phase 0 review is done (2026-10-07). Phase 1 is under way; milestones M1–M5 are in `docs/phase1-plan.md`.**
+M1 (statement splitting and execution scope) is written: `Scripts/ScriptSplitter.cs`, `script/split`,
+error lines mapped to the buffer, `:Dbbliss exec` / `exec_all`. It is **not yet verified**: it was written in a
+container with no `dotnet` or `nvim`, so CI is the first run. Don't start M2 until M1 is green on both platforms.
 
 - All 30 real-database scenarios pass on Linux (PostgreSQL 17 and SQL Server 2022 in Docker) and on
   Windows (CI: native PostgreSQL and SQL Server Express). Results: `docs/phase0-results.md`.

@@ -1,6 +1,7 @@
--- dbbliss.nvim — Phase 0 (cancel spike): connect, execute, cancel, transactions.
--- Results rendering is deliberately minimal here; Phase 1 replaces it.
+-- dbbliss.nvim — connect, execute, cancel, transactions. Results rendering is deliberately minimal
+-- until Phase 1's results buffer (M3).
 local backend_mod = require('dbbliss.backend')
+local script = require('dbbliss.script')
 
 local M = {}
 
@@ -41,8 +42,12 @@ local state = {
   queries = {},
   seq = 0,
   results_buf = nil, ---@type integer?
+  --- connection id → true while a script (split, then its statements one by one) is running
+  scripts = {},
 }
 M._state = state
+
+local diagnostics = vim.api.nvim_create_namespace('dbbliss')
 
 local function notify(msg, level)
   vim.notify('dbbliss: ' .. msg, level or vim.log.levels.INFO)
@@ -143,6 +148,7 @@ local function on_backend_exit(code, signal)
     end
   end
   state.queries = {}
+  state.scripts = {}
   state.connections = {}
   state.connecting = {}
   state.current = nil
@@ -201,7 +207,9 @@ local function register_handlers(b)
     append({ line })
     if p.error and p.error ~= vim.NIL then
       local e = p.error
-      local where = (e.line and e.line ~= vim.NIL) and (' (line %s)'):format(e.line) or ''
+      -- The buffer line the statement came from, else the engine's line within the statement.
+      local line = (e.buffer_line and e.buffer_line ~= vim.NIL) and e.buffer_line or e.line
+      local where = (line and line ~= vim.NIL) and (' (line %s)'):format(line) or ''
       append({ '-- error' .. where .. ': ' .. tostring(e.message) })
       if p.status == 'error' then
         notify(tostring(e.message), vim.log.levels.ERROR)
@@ -305,11 +313,23 @@ local function current_connection()
 end
 
 ---@param sql string
----@param opts { on_done: fun(p: table)? }?
+---@param opts { on_done: fun(p: table)?, connection: string?, line_offset: integer? }?
+---   connection: run on this connection instead of the current one. line_offset: the 0-based buffer
+---   line the sql starts on, so an error's line can be reported in the buffer.
+---   on_done is also called, with status 'not_started', when the backend refuses the request.
 ---@return string? query_id
 function M.execute(sql, opts)
-  local name, conn = current_connection()
+  opts = opts or {}
+  local name, conn
+  if opts.connection then
+    name, conn = opts.connection, state.connections[opts.connection]
+  else
+    name, conn = current_connection()
+  end
   if not conn then
+    if opts.connection then
+      notify(opts.connection .. ' is no longer connected', vim.log.levels.ERROR)
+    end
     return nil
   end
   state.seq = state.seq + 1
@@ -320,18 +340,125 @@ function M.execute(sql, opts)
     status = 'running',
     rows = 0,
     result_sets = 0,
-    on_done = opts and opts.on_done,
+    on_done = opts.on_done,
   }
   show_results()
   append({ '', ('-- %s on %s'):format(query_id, name) })
-  state.backend:request('execute', { connection_id = conn.id, query_id = query_id, sql = sql }, function(err)
+  state.backend:request('execute', {
+    connection_id = conn.id,
+    query_id = query_id,
+    sql = sql,
+    line_offset = opts.line_offset,
+  }, function(err)
     if err then
       state.queries[query_id] = nil
       append({ '-- not started: ' .. err.message })
       notify('execute failed: ' .. err.message, vim.log.levels.ERROR)
+      if opts.on_done then
+        opts.on_done({ query_id = query_id, status = 'not_started', error = { message = err.message } })
+      end
     end
   end)
   return query_id
+end
+
+-- Running buffer text ---------------------------------------------------------------------
+
+--- A byte column as the UTF-16 column the backend counts in.
+local function utf16_col(bufnr, row, byte_col)
+  local line = vim.api.nvim_buf_get_lines(bufnr, row, row + 1, false)[1] or ''
+  local ok, idx = pcall(vim.str_utfindex, line, 'utf-16', math.min(byte_col, #line))
+  return (ok and type(idx) == 'number') and idx or byte_col
+end
+
+--- Runs the queue one statement at a time on one connection and stops at the first one that does
+--- not complete, saying which it was. Whatever is left is not run: a script must not carry on after
+--- the statement it depends on failed.
+local function run_queue(name, conn_id, bufnr, queue)
+  local function finish()
+    state.scripts[conn_id] = nil
+  end
+  local noun = (state.connections[name] and state.connections[name].engine == 'sqlserver') and 'batch' or 'statement'
+  local function step(i)
+    local unit = queue[i]
+    if not unit then
+      return finish()
+    end
+    local qid = M.execute(unit.text, {
+      connection = name,
+      line_offset = unit.line_offset,
+      on_done = function(p)
+        if p.status == 'completed' then
+          return step(i + 1)
+        end
+        local e = p.error
+        if e and e ~= vim.NIL and e.buffer_line and e.buffer_line ~= vim.NIL and vim.api.nvim_buf_is_valid(bufnr) then
+          vim.diagnostic.set(diagnostics, bufnr, {
+            { lnum = e.buffer_line - 1, col = 0, severity = vim.diagnostic.severity.ERROR, source = 'dbbliss', message = tostring(e.message) },
+          })
+        end
+        local left = #queue - i
+        append({
+          ('-- stopped: %s %d of %d (buffer line %d) %s%s'):format(
+            noun,
+            unit.index,
+            unit.count,
+            unit.line_offset + 1,
+            p.status == 'not_started' and 'was not started' or p.status,
+            left > 0 and ('; %d not run'):format(left) or ''
+          ),
+        })
+        finish()
+      end,
+    })
+    if not qid then
+      finish()
+    end
+  end
+  step(1)
+end
+
+--- Runs buffer text on the current connection: the statement under the cursor, the whole buffer, or
+--- a line range. Splitting is the backend's job (script/split); a GO count repeats its batch.
+---@param scope 'statement'|'buffer'|'range'
+---@param range { [1]: integer, [2]: integer }?  1-based first and last line, for 'range'
+function M.run(scope, range)
+  local name, conn = current_connection()
+  if not conn then
+    return
+  end
+  if state.scripts[conn.id] then
+    notify(('a script is already running on %s; cancel it first'):format(name), vim.log.levels.WARN)
+    return
+  end
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local first, last = 1, vim.api.nvim_buf_line_count(bufnr)
+  if scope == 'range' and range then
+    first, last = range[1], range[2]
+  end
+  local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, first - 1, last, false), '\n')
+  local cursor_line, cursor_col = cursor[1] - first, utf16_col(bufnr, cursor[1] - 1, cursor[2])
+  local conn_id = conn.id
+  vim.diagnostic.reset(diagnostics, bufnr)
+  state.scripts[conn_id] = true
+  state.backend:request('script/split', { engine = conn.engine, text = text }, function(err, result)
+    if err then
+      state.scripts[conn_id] = nil
+      notify('could not split the script: ' .. err.message, vim.log.levels.ERROR)
+      return
+    end
+    local statements = result.statements
+    if scope == 'statement' then
+      statements = { script.pick(statements, cursor_line, cursor_col) }
+    end
+    if #statements == 0 then
+      state.scripts[conn_id] = nil
+      notify('nothing to run')
+      return
+    end
+    run_queue(name, conn_id, bufnr, script.expand(statements, first - 1))
+  end)
 end
 
 --- Cancels the running query on the current connection (or the given query id).
@@ -464,9 +591,12 @@ local subcommands = {
   connect = function(args)
     M.connect(args[1])
   end,
+  -- The statement under the cursor, or every statement in the lines of a range.
   exec = function(_, range)
-    local lines = vim.api.nvim_buf_get_lines(0, range[1] - 1, range[2], false)
-    M.execute(table.concat(lines, '\n'))
+    M.run(range and 'range' or 'statement', range)
+  end,
+  exec_all = function()
+    M.run('buffer')
   end,
   cancel = function()
     M.cancel()
@@ -486,7 +616,7 @@ function M.command(opts)
     notify('usage: :Dbbliss {' .. table.concat(vim.tbl_keys(subcommands), '|') .. '}', vim.log.levels.ERROR)
     return
   end
-  local range = opts.range > 0 and { opts.line1, opts.line2 } or { 1, vim.api.nvim_buf_line_count(0) }
+  local range = opts.range > 0 and { opts.line1, opts.line2 } or nil
   fn(args, range)
 end
 

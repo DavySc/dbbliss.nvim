@@ -1,4 +1,5 @@
 using System.Globalization;
+using Dbbliss.Backend.Scripts;
 using Microsoft.Data.SqlClient;
 
 namespace Dbbliss.Backend.Engines;
@@ -7,6 +8,8 @@ namespace Dbbliss.Backend.Engines;
 public sealed class SqlServerEngine : IEngine
 {
     public string Name => "sqlserver";
+
+    public ScriptDialect Dialect => ScriptDialect.GoBatches;
 
     public async Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct)
     {

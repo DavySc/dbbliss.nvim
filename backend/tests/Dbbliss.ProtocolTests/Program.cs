@@ -24,6 +24,9 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("execute_right_after_transaction_call", "lease released too late", ExecuteRightAfterTransactionCall),
     ("instances_dead_ids", "", InstancesDeadIds),
     ("instances_prune", "", InstancesPrune),
+    ("splitter_cases", "", () => { SplitterCases.Run(); return Task.CompletedTask; }),
+    ("script_split_rpc", "", ScriptSplitRpc),
+    ("error_line_in_buffer", "", ErrorLineInBuffer),
 };
 
 var failed = 0;
@@ -212,6 +215,43 @@ static Task InstancesPrune()
     finally
     {
         dir.Delete(recursive: true);
+    }
+}
+
+// script/split needs an engine but no connection, and positions are 0-based.
+static async Task ScriptSplitRpc()
+{
+    await using var h = new Harness();
+    var result = await h.ResultAsync("script/split", new JsonObject { ["engine"] = "fake", ["text"] = "select 1;\n  select 2;" });
+    var statements = result["statements"]!.AsArray();
+    if (statements.Count != 2) throw new TestFailure($"expected 2 statements, got {result.ToJsonString()}");
+    var second = statements[1]!;
+    if (second["text"]!.GetValue<string>() != "select 2;"
+        || second["start"]!["line"]!.GetValue<int>() != 1 || second["start"]!["col"]!.GetValue<int>() != 2
+        || second["end"]!["line"]!.GetValue<int>() != 1 || second["end"]!["col"]!.GetValue<int>() != 11
+        || second["repeat"]!.GetValue<int>() != 1)
+    {
+        throw new TestFailure($"second statement is wrong: {second.ToJsonString()}");
+    }
+    ExpectError(await h.CallAsync("script/split", new JsonObject { ["engine"] = "nope", ["text"] = "" }), RpcErrors.InvalidParams, "unknown engine");
+    ExpectError(await h.CallAsync("script/split", new JsonObject { ["engine"] = "fake" }), RpcErrors.InvalidParams, "missing text");
+}
+
+// An error's place in the source buffer: the statement's first line plus the engine's line. The
+// engine here reports a character offset, as PostgreSQL does, including after an astral character.
+static async Task ErrorLineInBuffer()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    foreach (var (sql, offset, line, bufferLine) in new[] { ("select 1,\n2,\nPOSFAIL", 10, 3, 13), ("select '😀'\n, POSFAIL", 0, 2, 2), ("POSFAIL", 4, 1, 5) })
+    {
+        var q = "q" + offset;
+        await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = q, ["sql"] = sql, ["line_offset"] = offset });
+        var error = (await h.NotificationAsync("query/done", q))["params"]!["error"];
+        if (error?["line"]?.GetValue<int>() != line || error["buffer_line"]?.GetValue<int>() != bufferLine)
+        {
+            throw new TestFailure($"{sql.Replace("\n", "\\n")} at offset {offset}: expected line {line} and buffer line {bufferLine}, got {error?.ToJsonString()}");
+        }
     }
 }
 
