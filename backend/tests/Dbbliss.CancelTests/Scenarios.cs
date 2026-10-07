@@ -296,7 +296,9 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
     /// <summary>
     /// Phase 1 M1: a failing statement's error is reported on its line in the source buffer. The
     /// statement starts on buffer line 10 (0-based) and fails on its second line, so the buffer line
-    /// is 12 (1-based). SQL Server reports a line; PostgreSQL a character offset the backend converts.
+    /// is 12 (1-based). SQL Server reports a line, and it is the line the failing statement starts on
+    /// (not the line of the bad name inside it), so there the failing statement is a second one.
+    /// PostgreSQL reports a character offset the backend converts.
     /// </summary>
     private async Task<ScenarioResult> ErrorLineInBuffer()
     {
@@ -307,7 +309,9 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
         {
             ["connection_id"] = connId,
             ["query_id"] = "e1",
-            ["sql"] = "SELECT 1\nFROM dbbliss_no_such_table_m1",
+            ["sql"] = profile.Engine == "sqlserver"
+                ? "SELECT 1\nSELECT * FROM dbbliss_no_such_table_m1"
+                : "SELECT 1\nFROM dbbliss_no_such_table_m1",
             ["line_offset"] = 10,
         });
         var done = (await c.WaitDoneAsync("e1", DoneTimeoutMs))["params"]!;
