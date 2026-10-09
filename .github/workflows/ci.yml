@@ -76,9 +76,9 @@ jobs:
       - name: End-to-end through the plugin (both engines)
         shell: bash
         run: |
-          DBBLISS_E2E_ENGINE=postgres DBBLISS_E2E_CS="$DBBLISS_TEST_PG" DBBLISS_E2E_PW_ENV=DBBLISS_TEST_PG_PASSWORD \
+          env DBBLISS_E2E_ENGINE=postgres DBBLISS_E2E_CS="$DBBLISS_TEST_PG" DBBLISS_E2E_PW_ENV=DBBLISS_TEST_PG_PASSWORD \
             nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/e2e_test.lua
-          DBBLISS_E2E_ENGINE=sqlserver DBBLISS_E2E_CS="$DBBLISS_TEST_MSSQL" ${DBBLISS_TEST_MSSQL_PASSWORD:+DBBLISS_E2E_PW_ENV=DBBLISS_TEST_MSSQL_PASSWORD} \
+          env DBBLISS_E2E_ENGINE=sqlserver DBBLISS_E2E_CS="$DBBLISS_TEST_MSSQL" ${DBBLISS_TEST_MSSQL_PASSWORD:+DBBLISS_E2E_PW_ENV=DBBLISS_TEST_MSSQL_PASSWORD} \
             nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/e2e_test.lua
 
       - name: Phase 0 cancel suite

@@ -33,14 +33,25 @@ local function expect(cond, msg)
   end
 end
 
-local function wait(what, cond, timeout)
-  if not vim.wait(timeout or 20000, cond, 20) then
-    error('timed out waiting for ' .. what .. '\n' .. table.concat(results.lines(), '\n'), 0)
-  end
-end
-
 local function text()
   return table.concat(results.lines(), '\n')
+end
+
+--- The start and end of the results buffer, for failure messages (it can hold thousands of rows).
+local function excerpt()
+  local lines = results.lines()
+  if #lines <= 40 then
+    return table.concat(lines, '\n')
+  end
+  return table.concat(vim.list_slice(lines, 1, 15), '\n')
+    .. ('\n... %d lines ...\n'):format(#lines - 30)
+    .. table.concat(vim.list_slice(lines, #lines - 14), '\n')
+end
+
+local function wait(what, cond, timeout)
+  if not vim.wait(timeout or 20000, cond, 20) then
+    error('timed out waiting for ' .. what .. '\n' .. excerpt(), 0)
+  end
 end
 
 local function buffer(lines)
@@ -83,11 +94,11 @@ local steps = {
       dbbliss.run('buffer')
       wait('the script', idle)
       local t = text()
-      expect(t:find('a │ b', 1, true), 'first table missing:\n' .. t)
-      expect(t:find('(1 row)', 1, true), 'row count missing:\n' .. t)
-      expect(t:find('-- error (line 3)', 1, true) or t:find('-- error (line 2)', 1, true), 'error line missing:\n' .. t)
-      expect(t:find('stopped: ', 1, true), 'stop notice missing:\n' .. t)
-      expect(not t:find('never', 1, true), 'a statement after the failing one ran:\n' .. t)
+      expect(t:find('a │ b', 1, true), 'first table missing:\n' .. excerpt())
+      expect(t:find('(1 row)', 1, true), 'row count missing:\n' .. excerpt())
+      expect(t:find('-- error (line 3)', 1, true) or t:find('-- error (line 2)', 1, true), 'error line missing:\n' .. excerpt())
+      expect(t:find('stopped: ', 1, true), 'stop notice missing:\n' .. excerpt())
+      expect(not t:find('never', 1, true), 'a statement after the failing one ran:\n' .. excerpt())
       expect(#vim.diagnostic.get(0) == 1, 'the error was not marked in the buffer')
     end,
   },
@@ -100,8 +111,8 @@ local steps = {
       dbbliss.run('statement')
       wait('the statement', idle)
       local t = text()
-      expect(t:find(pg and 'first_one' or 'second_one', 1, true), 'the wrong statement ran:\n' .. t)
-      expect(not t:find(pg and 'second_one' or 'first_one', 1, true), 'both statements ran:\n' .. t)
+      expect(t:find(pg and 'first_one' or 'second_one', 1, true), 'the wrong statement ran:\n' .. excerpt())
+      expect(not t:find(pg and 'second_one' or 'first_one', 1, true), 'both statements ran:\n' .. excerpt())
     end,
   },
   {
@@ -135,7 +146,7 @@ local steps = {
       end)
       dbbliss.cancel()
       wait('the cancel', idle)
-      expect(text():find('cancelled in', 1, true), 'cancelled status missing:\n' .. text())
+      expect(text():find('cancelled in', 1, true), 'cancelled status missing:\n' .. excerpt())
     end,
   },
   {
@@ -167,7 +178,7 @@ local steps = {
       expect(#lines == 2501, 'expected a header and 2500 rows, got ' .. #lines)
       expect(lines[1] == 'n,pad', 'header is ' .. lines[1])
       expect(lines[2] == '1,xxx', 'first row is ' .. lines[2])
-      expect(text():find('exported 2500 rows', 1, true), 'export notice missing:\n' .. text())
+      expect(text():find('exported 2500 rows', 1, true), 'export notice missing:\n' .. excerpt())
     end,
   },
 }
