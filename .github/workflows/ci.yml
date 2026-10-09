@@ -112,3 +112,44 @@ jobs:
         if: always()
         shell: bash
         run: cat cancel-report.md >> "$GITHUB_STEP_SUMMARY" || true
+
+  # The formal models in spec/ (TLA+ query lifecycle, Quint client/transactions): the proposed design
+  # must hold and every other variant must fail the documented way. Linux only; the models do not
+  # depend on the OS. A separate job so a slow or red model check does not hide the test results.
+  spec-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TLA_JAR: ${{ github.workspace }}/.tools/tla2tools.jar
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The jar and Apalache (which `quint verify` downloads on first use) are fetched once per cache key.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            .tools
+            ~/.quint
+          key: spec-tools-tlc-1.8.0-v1
+
+      - name: Install TLA+ tools and Quint
+        shell: bash
+        run: |
+          mkdir -p .tools
+          [ -s "$TLA_JAR" ] || curl -fsSL -o "$TLA_JAR" https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+          npm install -g @informalsystems/quint
+          java -version
+          quint --version
+
+      - name: Check the models
+        shell: bash
+        run: spec/check.sh
