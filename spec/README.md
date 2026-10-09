@@ -10,13 +10,15 @@ spec/check.sh     # ~3 min; needs Java, $TLA_JAR (default ~/.local/share/tla/tla
 
 ## `tla/QueryLifecycle.tla`: one query in the backend
 
-The query thread, cancel/re-fire, backpressure, the stdout pump, a Neovim that may stall or die, and
+The query thread, pull paging (`ClientFetch`: the client allows rows, the query thread waits when it has none), cancel/re-fire, backpressure, the stdout pump, a Neovim that may stall or die, and
 the database server. Rows are not counted. Loss is tracked by the only actions that can drop a row.
 
 | Config | Design | Result |
 |---|---|---|
 | `Proposed.cfg` | the current code | all safety properties, plus cancel/shutdown stop the server even with Neovim stalled forever |
-| `ProposedLive.cfg` | same, Neovim keeps reading | a cancelled query always reports `query/done` |
+| `ProposedLive.cfg` | same, Neovim keeps reading | a cancelled query always reports `query/done`, and a paused query that is allowed more rows goes on |
+| `PausedNoWake.cfg` | a cancel does not end the wait for credit | liveness: a cancelled paused query leaves the server running (SQL Server never sees the attention) |
+| `PausedReachable.cfg` | witness | `PausedUnreachable` is violated: the model does reach a paused query |
 | `Current.cfg` | streamer before the post-cancel overflow | `NoSilentLoss`: a cancel while Neovim is stalled drops rows the server already sent |
 | `BeforeQueue.cfg` | blocking write (Phase 0 bug) | liveness: a stalled Neovim keeps the server running |
 | `NoRefire.cfg` | protocol cancel sent once | liveness: a cancel before the statement is on the wire is lost |

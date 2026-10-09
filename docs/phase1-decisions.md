@@ -105,11 +105,13 @@ a Kerberos ticket from `kinit`). No new dependencies.
 
 ## Not done, or not checked
 
-- **The paging protocol is not in the TLA+ model** (`spec/tla/QueryLifecycle.tla`). It reuses the
-  modelled slot wait and wake, and the cancel scenarios pass against both databases, but the rule
-  in `CLAUDE.md` (model it first) was not followed: TLC could not be downloaded where this was
-  written. **Run `spec/check.sh` on your machine**, and add a `ClientFetch` action if you want it
-  modelled.
+- **The paging protocol is in the TLA+ model, after the code** (the rule in `CLAUDE.md` is to
+  model first). `QueryLifecycle.tla` has `credit` and `ClientFetch`; the wait for credit is the
+  page-slot wait with the same wake on cancel. `Proposed` holds all safety properties and
+  `CancelStopsServer` with Neovim stalled forever; `ProposedLive` also proves a paused query that is
+  allowed more rows goes on; `PausedNoWake` (a cancel does not end the credit wait) fails
+  `CancelStopsServer`; `PausedReachable` shows the model reaches a paused query. The model counts
+  rows 1:1 with pages, as before, and a fetch is atomic (no fetch in flight).
 - **`Proposed` in `client.qnt` with the quit action** verifies exhaustively with TLC through Apalache
   (about 2.5 minutes, no violation); the two quit variants live in `client_quit.qnt` and are
   checked by simulation, because Apalache fails on them without a message (see that file).

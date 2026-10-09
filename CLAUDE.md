@@ -30,8 +30,10 @@ references in `Credentials.cs`.
 - Formal models in `spec/` (TLA+ query lifecycle, Quint client/transactions) found four bugs after
   the spike. All are fixed and covered by tests (`docs/phase0-results.md`, bugs 5–8; `spec/README.md`).
 
-Open from Phase 1: the paging protocol is not in `spec/tla/QueryLifecycle.tla`. `spec/check.sh` runs
-in CI (job `spec-check`); the quit variants are in `spec/quint/client_quit.qnt`.
+`spec/check.sh` runs in CI (job `spec-check`). Pull paging is in `spec/tla/QueryLifecycle.tla`
+(`ClientFetch`, `credit`); the quit variants are in `spec/quint/client_quit.qnt`. To run the TLA+
+part without downloading `tla2tools.jar`, point `TLA_JAR` at Apalache's jar
+(`~/.quint/apalache-dist-*/apalache/lib/apalache.jar`), which contains TLC.
 
 ## Rules that are easy to miss
 

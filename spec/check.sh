@@ -46,6 +46,8 @@ tlc Current 'Invariant NoSilentLoss is violated'
 tlc BeforeQueue 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 tlc NoRefire 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 tlc NoConnCheck 'Temporal propert(y|ies).*(violated|is violated|were violated)'
+tlc PausedNoWake 'Temporal propert(y|ies).*(violated|is violated|were violated)'
+tlc PausedReachable 'Invariant PausedUnreachable is violated'
 
 echo "Quint: spec/quint/client.qnt"
 if (cd "$root/quint" && quint typecheck client.qnt >/dev/null && quint typecheck client_quit.qnt >/dev/null); then ok "typecheck"; else bad "typecheck"; fi
