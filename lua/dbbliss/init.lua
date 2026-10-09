@@ -2,6 +2,7 @@
 -- until Phase 1's results buffer (M3).
 local backend_mod = require('dbbliss.backend')
 local script = require('dbbliss.script')
+local results = require('dbbliss.results')
 
 local M = {}
 
@@ -18,13 +19,13 @@ local TRANSACTION_OPEN = 1003
 ---@class dbbliss.Config
 ---@field connections table<string, dbbliss.ConnectionConfig>
 ---@field backend { cmd: string[]?, shutdown_timeout_ms: integer }
----@field max_rows_shown integer
+---@field results { window_rows: integer, max_col_width: integer }
 
 ---@type dbbliss.Config
 local defaults = {
   connections = {},
   backend = { cmd = nil, shutdown_timeout_ms = 7000 },
-  max_rows_shown = 1000,
+  results = { window_rows = 1000, max_col_width = 40 },
 }
 
 local state = {
@@ -41,7 +42,6 @@ local state = {
   --- query id → { connection (name), connection_id, status, rows, result_sets, on_done }
   queries = {},
   seq = 0,
-  results_buf = nil, ---@type integer?
   --- connection id → true while a script (split, then its statements one by one) is running
   scripts = {},
 }
@@ -89,51 +89,13 @@ function M.setup(opts)
       error(('dbbliss: connection %s needs engine and connection_string'):format(name), 0)
     end
   end
-end
-
--- Results buffer (minimal) ---------------------------------------------------------------
-
-local function results_buf()
-  if state.results_buf and vim.api.nvim_buf_is_valid(state.results_buf) then
-    return state.results_buf
-  end
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_name(buf, 'dbbliss://results')
-  vim.bo[buf].buftype = 'nofile'
-  vim.bo[buf].bufhidden = 'hide'
-  vim.bo[buf].swapfile = false
-  state.results_buf = buf
-  return buf
-end
-
-local function append(lines)
-  local buf = results_buf()
-  local count = vim.api.nvim_buf_line_count(buf)
-  local first = vim.api.nvim_buf_get_lines(buf, 0, 1, false)[1]
-  if count == 1 and first == '' then
-    vim.api.nvim_buf_set_lines(buf, 0, 1, false, lines)
-  else
-    vim.api.nvim_buf_set_lines(buf, count, count, false, lines)
-  end
-  for _, win in ipairs(vim.fn.win_findbuf(buf)) do
-    vim.api.nvim_win_set_cursor(win, { vim.api.nvim_buf_line_count(buf), 0 })
-  end
-end
-
-local function show_results()
-  local buf = results_buf()
-  if #vim.fn.win_findbuf(buf) == 0 then
-    vim.cmd('botright split')
-    vim.api.nvim_win_set_buf(0, buf)
-    vim.cmd('wincmd p')
-  end
-end
-
-local function cell(v)
-  if v == vim.NIL or v == nil then
-    return 'NULL'
-  end
-  return tostring(v)
+  results.setup({
+    window_rows = state.config.results.window_rows,
+    max_col_width = state.config.results.max_col_width,
+    on_fetch = function(query_id, rows)
+      M.fetch(query_id, rows)
+    end,
+  })
 end
 
 -- Backend lifecycle -----------------------------------------------------------------------
@@ -142,7 +104,7 @@ local function on_backend_exit(code, signal)
   local had = next(state.connections) ~= nil
   for id, q in pairs(state.queries) do
     q.status = 'lost'
-    append({ ('-- query %s LOST: backend exited (code %d, signal %d)'):format(id, code, signal) })
+    results.note({ ('-- query %s LOST: backend exited (code %d, signal %d)'):format(id, code, signal) }, 'DbblissError')
     if q.on_done then
       q.on_done({ query_id = id, status = 'lost' })
     end
@@ -164,32 +126,34 @@ local function register_handlers(b)
     if q then
       q.result_sets = q.result_sets + 1
     end
-    local names = vim.tbl_map(function(c)
-      return c.name
-    end, p.columns)
-    append({ ('-- result set %d'):format(p.result_set + 1), table.concat(names, ' | ') })
+    results.resultset(p)
   end)
   b:on('query/rows', function(p)
     local q = state.queries[p.query_id]
-    local lines = {}
-    for _, row in ipairs(p.rows) do
-      if q then
-        q.rows = q.rows + 1
-        if q.rows > state.config.max_rows_shown then
-          break
-        end
+    if q then
+      q.rows = q.rows + #p.rows
+      if q.discard then
+        -- Cancelled while paused at the window's end: the rows that were already on their way are
+        -- not appended to the table (there can be hundreds of thousands). They are counted and
+        -- reported at the end, never dropped unnoticed.
+        q.discarded = (q.discarded or 0) + #p.rows
+        return
       end
-      lines[#lines + 1] = table.concat(vim.tbl_map(cell, row), ' | ')
     end
-    if #lines > 0 then
-      append(lines)
-    end
+    results.rows(p)
   end)
   b:on('query/resultset_done', function(p)
-    append({ ('-- %d row(s)'):format(p.rows) })
+    results.resultset_done(p)
+  end)
+  b:on('query/paused', function(p)
+    local q = state.queries[p.query_id]
+    if q then
+      q.paused = true
+    end
+    results.paused(p)
   end)
   b:on('query/message', function(p)
-    append({ ('-- [%s] %s'):format(p.severity, p.text) })
+    results.message(p)
     if p.severity == 'warning' or p.severity == 'error' then
       notify(p.text, vim.log.levels.WARN)
     end
@@ -200,17 +164,33 @@ local function register_handlers(b)
   b:on('query/done', function(p)
     local q = state.queries[p.query_id]
     state.queries[p.query_id] = nil
+    results.query_ended(p.query_id)
     local line = ('-- %s in %d ms'):format(p.status, p.elapsed_ms)
     if p.cancel and p.cancel ~= vim.NIL then
       line = line .. (' (cancel acknowledged after %d ms)'):format(p.cancel.ack_ms)
     end
-    append({ line })
+    results.note({ line }, 'DbblissInfo')
+    if q and q.discarded and q.discarded > 0 then
+      results.note({ ('-- %d more rows had already arrived when the cancel was sent; they are not shown'):format(q.discarded) }, 'DbblissWarn')
+    end
+    if p.truncated_rows and p.truncated_rows ~= vim.NIL then
+      results.note({ ('-- %d rows were not shown (cancelled while more were arriving)'):format(p.truncated_rows) }, 'DbblissWarn')
+    end
+    if p.export and p.export ~= vim.NIL then
+      local e = p.export
+      results.note({
+        ('-- exported %d rows to %s%s'):format(e.rows, e.path, e.complete and '' or ' (INCOMPLETE: the file ends where the query stopped)'),
+      }, e.complete and 'DbblissInfo' or 'DbblissError')
+      if e.ignored_result_sets and e.ignored_result_sets > 0 then
+        results.note({ ('-- %d further result set(s) were not exported'):format(e.ignored_result_sets) }, 'DbblissWarn')
+      end
+    end
     if p.error and p.error ~= vim.NIL then
       local e = p.error
       -- The buffer line the statement came from, else the engine's line within the statement.
       local line = (e.buffer_line and e.buffer_line ~= vim.NIL) and e.buffer_line or e.line
       local where = (line and line ~= vim.NIL) and (' (line %s)'):format(line) or ''
-      append({ '-- error' .. where .. ': ' .. tostring(e.message) })
+      results.note({ '-- error' .. where .. ': ' .. tostring(e.message) }, 'DbblissError')
       if p.status == 'error' then
         notify(tostring(e.message), vim.log.levels.ERROR)
       end
@@ -313,9 +293,11 @@ local function current_connection()
 end
 
 ---@param sql string
----@param opts { on_done: fun(p: table)?, connection: string?, line_offset: integer? }?
+---@param opts { on_done: fun(p: table)?, connection: string?, line_offset: integer?, window: integer|false?, export: { path: string, overwrite: boolean? }? }?
 ---   connection: run on this connection instead of the current one. line_offset: the 0-based buffer
 ---   line the sql starts on, so an error's line can be reported in the buffer.
+---   window: rows to fetch at a time (default config.results.window_rows; false for no paging).
+---   export: write the first result set to a CSV file in the backend instead of showing it.
 ---   on_done is also called, with status 'not_started', when the backend refuses the request.
 ---@return string? query_id
 function M.execute(sql, opts)
@@ -342,24 +324,57 @@ function M.execute(sql, opts)
     result_sets = 0,
     on_done = opts.on_done,
   }
-  show_results()
-  append({ '', ('-- %s on %s'):format(query_id, name) })
+  results.show()
+  results.note({ '', ('-- %s on %s'):format(query_id, name) }, 'DbblissInfo')
+  local window = opts.window
+  if window == nil then
+    window = state.config.results.window_rows
+  end
   state.backend:request('execute', {
     connection_id = conn.id,
     query_id = query_id,
     sql = sql,
     line_offset = opts.line_offset,
+    window = (window and not opts.export) and window or nil,
+    export = opts.export,
   }, function(err)
     if err then
       state.queries[query_id] = nil
-      append({ '-- not started: ' .. err.message })
-      notify('execute failed: ' .. err.message, vim.log.levels.ERROR)
+      results.note({ '-- not started: ' .. err.message }, 'DbblissError')
+      if not (opts.export and err.data and err.data ~= vim.NIL and err.data.exists) then
+        notify('execute failed: ' .. err.message, vim.log.levels.ERROR)
+      end
       if opts.on_done then
-        opts.on_done({ query_id = query_id, status = 'not_started', error = { message = err.message } })
+        opts.on_done({ query_id = query_id, status = 'not_started', error = { message = err.message }, request_error = err })
       end
     end
   end)
   return query_id
+end
+
+--- Lets a paused query send `rows` more rows.
+---@param query_id string
+---@param rows integer
+function M.fetch(query_id, rows)
+  if not state.backend then
+    return
+  end
+  local q = state.queries[query_id]
+  if q then
+    q.paused = false
+  end
+  state.backend:request('fetch', { query_id = query_id, rows = rows }, function(err, result)
+    if err then
+      notify('fetch failed: ' .. err.message, vim.log.levels.ERROR)
+    elseif result.state == 'not_running' then
+      notify('the query had already ended')
+    end
+  end)
+end
+
+--- Fetches the next window of rows of the paused result (also on moving to the end of the buffer).
+function M.fetch_more()
+  results.fetch_more()
 end
 
 -- Running buffer text ---------------------------------------------------------------------
@@ -398,7 +413,7 @@ local function run_queue(name, conn_id, bufnr, queue)
           })
         end
         local left = #queue - i
-        append({
+        results.note({
           ('-- stopped: %s %d of %d (buffer line %d) %s%s'):format(
             noun,
             unit.index,
@@ -407,7 +422,7 @@ local function run_queue(name, conn_id, bufnr, queue)
             p.status == 'not_started' and 'was not started' or p.status,
             left > 0 and ('; %d not run'):format(left) or ''
           ),
-        })
+        }, 'DbblissError')
         finish()
       end,
     })
@@ -418,11 +433,12 @@ local function run_queue(name, conn_id, bufnr, queue)
   step(1)
 end
 
---- Runs buffer text on the current connection: the statement under the cursor, the whole buffer, or
---- a line range. Splitting is the backend's job (script/split); a GO count repeats its batch.
+--- Splits the text of `scope` (the backend does it) and hands the statements over. The connection is
+--- marked busy with a script from here until `release` is called, which `cb` must arrange.
 ---@param scope 'statement'|'buffer'|'range'
 ---@param range { [1]: integer, [2]: integer }?  1-based first and last line, for 'range'
-function M.run(scope, range)
+---@param cb fun(name: string, conn_id: string, bufnr: integer, statements: dbbliss.Statement[], base_line: integer)
+local function with_statements(scope, range, cb)
   local name, conn = current_connection()
   if not conn then
     return
@@ -457,7 +473,62 @@ function M.run(scope, range)
       notify('nothing to run')
       return
     end
-    run_queue(name, conn_id, bufnr, script.expand(statements, first - 1))
+    cb(name, conn_id, bufnr, statements, first - 1)
+  end)
+end
+
+--- Runs buffer text on the current connection: the statement under the cursor, the whole buffer, or
+--- a line range. Splitting is the backend's job (script/split); a GO count repeats its batch.
+---@param scope 'statement'|'buffer'|'range'
+---@param range { [1]: integer, [2]: integer }?  1-based first and last line, for 'range'
+function M.run(scope, range)
+  with_statements(scope, range, function(name, conn_id, bufnr, statements, base_line)
+    results.clear()
+    run_queue(name, conn_id, bufnr, script.expand(statements, base_line))
+  end)
+end
+
+--- Writes one statement's first result set to a CSV file, in the backend: the rows never pass
+--- through Neovim. Asks before replacing a file.
+---@param path string?  asked for when nil
+---@param scope 'statement'|'buffer'|'range'?  default 'statement'
+---@param range { [1]: integer, [2]: integer }?
+function M.export(path, scope, range)
+  with_statements(scope or 'statement', range, function(name, conn_id, bufnr, statements, base_line)
+    local function release()
+      state.scripts[conn_id] = nil
+    end
+    if #statements ~= 1 then
+      release()
+      notify(('export takes one statement, got %d; put the cursor in one or select just it'):format(#statements), vim.log.levels.ERROR)
+      return
+    end
+    if not path or path == '' then
+      path = vim.fn.input('Export to (absolute path): ', '', 'file')
+    end
+    if path == '' then
+      release()
+      return
+    end
+    path = vim.fn.fnamemodify(vim.fn.expand(path), ':p')
+    local unit = script.expand(statements, base_line)[1]
+    local function go(overwrite)
+      M.execute(unit.text, {
+        connection = name,
+        line_offset = unit.line_offset,
+        export = { path = path, overwrite = overwrite or nil },
+        on_done = function(p)
+          local exists = p.request_error and p.request_error.data and p.request_error.data ~= vim.NIL and p.request_error.data.exists
+          if exists and not overwrite then
+            if vim.fn.confirm(('%s exists. Replace it?'):format(path), '&Replace\n&Cancel', 2) == 1 then
+              return go(true)
+            end
+          end
+          release()
+        end,
+      })
+    end
+    go(false)
   end)
 end
 
@@ -474,6 +545,10 @@ function M.cancel(query_id)
   if not query_id or not state.backend then
     notify('no running query', vim.log.levels.WARN)
     return
+  end
+  local q = state.queries[query_id]
+  if q and q.paused then
+    q.discard = true
   end
   state.backend:request('cancel', { query_id = query_id }, function(err, result)
     if err then
@@ -597,6 +672,14 @@ local subcommands = {
   end,
   exec_all = function()
     M.run('buffer')
+  end,
+  -- Writes the statement under the cursor (or the range) to a CSV file; the path may be left out.
+  export = function(args, range)
+    M.export(args[1], range and 'range' or 'statement', range)
+  end,
+  -- Fetches the next window of rows of a paused result.
+  fetch = function()
+    M.fetch_more()
   end,
   cancel = function()
     M.cancel()

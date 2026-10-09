@@ -41,7 +41,7 @@ require('dbbliss').setup({
 })
 ```
 
-## Use (Phase 0)
+## Use
 
 | Command | |
 |---|---|
@@ -49,6 +49,8 @@ require('dbbliss').setup({
 | `:Dbbliss exec` | run the statement under the cursor (SQL Server: the `GO` batch) |
 | `:{range}Dbbliss exec` | run every statement in the lines of the range, e.g. a visual selection |
 | `:Dbbliss exec_all` | run the whole buffer, one statement at a time |
+| `:Dbbliss export [path]` | write the statement under the cursor (or the range) to a CSV file; the backend writes it, the rows never pass through Neovim |
+| `:Dbbliss fetch` | fetch the next window of rows of a paused result (also: `gm`, or move to the end of the buffer) |
 | `:Dbbliss cancel` | cancel the running query (protocol-level); the rest of a script is not run |
 | `:Dbbliss begin` / `commit` / `rollback` | explicit transactions |
 | `:Dbbliss status` | connections, transaction state, running queries |
@@ -60,8 +62,26 @@ semicolons, SQL Server at `GO` lines (`GO 5` repeats the batch), both aware of s
 quoted identifiers and, on PostgreSQL, dollar quoting. An error is shown on its line in the buffer
 (as a diagnostic) as well as in the results.
 
-Results go to a minimal `dbbliss://results` buffer (Phase 1 replaces it). Backend diagnostics go to
-`stdpath('log')/dbbliss-backend.log`.
+### Results
+
+Results go to the `dbbliss://results` buffer as aligned tables (column widths from the first rows,
+capped at `results.max_col_width`; wider values grow the column up to the cap, long text is shown
+shortened but yanked in full). A query shows `results.window_rows` rows (default 1000) and then
+**pauses**: the server is held by TCP backpressure, not finished, and the connection stays busy.
+`gm`, `:Dbbliss fetch` or moving the cursor to the end of the buffer fetches the next window;
+`:Dbbliss cancel` ends it. Rows that had already arrived when a paused query was cancelled are
+counted, not shown.
+
+In the results buffer: `<Tab>` / `<S-Tab>` next/previous cell, `yc` / `yr` / `yC` yank the cell /
+row / column (full values, NULL as empty), `]]` / `[[` next/previous result set, `gm` fetch more,
+`q` close. Server messages (NOTICE, PRINT, RAISERROR) go to a `dbbliss://messages` pane with their
+severity. Each run starts with empty buffers.
+
+```lua
+require('dbbliss').setup({ results = { window_rows = 1000, max_col_width = 40 } })
+```
+
+Backend diagnostics go to `stdpath('log')/dbbliss-backend.log`.
 
 ## Tests
 

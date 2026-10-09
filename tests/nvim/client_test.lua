@@ -272,6 +272,47 @@ local tests = {
     end,
   },
   {
+    -- query/paused shows the hint; asking for more sends fetch with the query's id and the window.
+    'paused_query_fetches_more',
+    '',
+    function()
+      script_setup({ 'select 1;' })
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0) } })
+      local r = take('execute')
+      expect(r.params.window == 1000, 'execute carries the row window: ' .. tostring(r.params.window))
+      r.cb(nil, { query_id = r.params.query_id })
+      stub.handlers['query/resultset']({ query_id = r.params.query_id, result_set = 0, columns = { { name = 'n', type = 'int4' } } })
+      stub.handlers['query/rows']({ query_id = r.params.query_id, result_set = 0, rows = { { 1 }, { 2 } } })
+      stub.handlers['query/paused']({ query_id = r.params.query_id, rows_sent = 2 })
+      dbbliss.fetch_more()
+      local f = take('fetch')
+      expect(f and f.params.query_id == r.params.query_id and f.params.rows == 1000, 'no fetch request for the paused query')
+    end,
+  },
+  {
+    -- Cancelling at the end of a window: rows already on their way are counted, not appended.
+    'cancel_while_paused_counts_late_rows',
+    '',
+    function()
+      script_setup({ 'select 1;' })
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0) } })
+      local r = take('execute')
+      local qid = r.params.query_id
+      r.cb(nil, { query_id = qid })
+      stub.handlers['query/resultset']({ query_id = qid, result_set = 0, columns = { { name = 'n', type = 'int4' } } })
+      stub.handlers['query/rows']({ query_id = qid, result_set = 0, rows = { { 1 } } })
+      stub.handlers['query/paused']({ query_id = qid, rows_sent = 1 })
+      dbbliss.cancel()
+      stub.handlers['query/rows']({ query_id = qid, result_set = 0, rows = { { 2 }, { 3 }, { 4 } } })
+      stub.handlers['query/done']({ query_id = qid, status = 'cancelled', elapsed_ms = 5, transaction = 'none' })
+      local text = table.concat(require('dbbliss.results').lines(), '\n')
+      expect(not text:find(' 4', 1, true), 'a late row was appended to the table:\n' .. text)
+      expect(text:find('3 more rows had already arrived', 1, true), 'the late rows were not reported:\n' .. text)
+    end,
+  },
+  {
     'run_not_started_ends_the_script',
     '',
     function()
