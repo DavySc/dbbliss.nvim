@@ -240,7 +240,7 @@ public sealed class SqlServerProfile : EngineProfile
     }
 
     public override Task DropCatalogFixtureAsync(DbConnection observer) => ExecAsync(observer,
-        $"IF DB_ID('{CatalogDb}') IS NOT NULL BEGIN ALTER DATABASE {CatalogDb} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {CatalogDb}; END");
+        $"USE master; IF DB_ID('{CatalogDb}') IS NOT NULL BEGIN ALTER DATABASE {CatalogDb} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {CatalogDb}; END");
 
     public override Task<string> CatalogDatabaseAsync(DbConnection observer) => Task.FromResult(CatalogDb);
 
