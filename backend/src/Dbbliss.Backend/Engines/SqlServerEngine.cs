@@ -75,7 +75,8 @@ public sealed partial class SqlServerEngine : IEngine
             Pooling = false,
         };
         if (spec.Password is not null) builder.Password = spec.Password;
-        if (string.IsNullOrEmpty(builder.ApplicationName) || builder.ApplicationName == "Core Microsoft SqlClient Data Provider")
+        // SqlClient reports its own name when the connection string sets none (an empty one counts as none).
+        if (builder.ApplicationName == "Core Microsoft SqlClient Data Provider")
         {
             builder.ApplicationName = "dbbliss.nvim";
         }

@@ -40,16 +40,16 @@
   "lines": 54.55
  },
  "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs": {
-  "branches": 72.73,
-  "lines": 81.88
+  "branches": 83.33,
+  "lines": 87.25
  },
  "backend/src/Dbbliss.Backend/Engines/QueryControl.cs": {
   "branches": 100.0,
   "lines": 100.0
  },
  "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs": {
-  "branches": 85.71,
-  "lines": 95.74
+  "branches": 93.62,
+  "lines": 97.01
  },
  "backend/src/Dbbliss.Backend/Engines/ValueConverter.cs": {
   "branches": 100.0,
