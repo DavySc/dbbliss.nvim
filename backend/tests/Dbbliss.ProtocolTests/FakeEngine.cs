@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using System.Collections.Concurrent;
 using Dbbliss.Backend.Engines;
 
@@ -57,6 +58,7 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
 
     public Task<ExecuteSummary> ExecuteAsync(string sql, IResultSink sink, QueryControl control)
     {
+        if (sql.StartsWith("ROWS ", StringComparison.Ordinal)) return StreamRowsAsync(int.Parse(sql[5..]), sink);
         lock (_gate)
         {
             switch (sql.Trim().ToUpperInvariant())
@@ -85,6 +87,21 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
             }
         }
         return Task.FromResult(new ExecuteSummary(-1));
+    }
+
+    /// <summary>
+    /// "ROWS n": one result set of n rows, read to the end whatever happens (a cancel does not stop a
+    /// driver that is draining its socket). Row i is [i, "v<i>", null, "q\"x"].
+    /// </summary>
+    private static async Task<ExecuteSummary> StreamRowsAsync(int n, IResultSink sink)
+    {
+        await sink.ResultSetAsync(0, [new ColumnInfo("id", "int"), new ColumnInfo("v", "text"), new ColumnInfo("n", "text"), new ColumnInfo("q", "text")]);
+        for (var i = 1; i <= n; i++)
+        {
+            await sink.RowAsync(0, new JsonArray(i, "v" + i, null, "q\"x"));
+        }
+        await sink.ResultSetDoneAsync(0, n);
+        return new ExecuteSummary(n);
     }
 
     public Task BeginTransactionAsync(CancellationToken ct)

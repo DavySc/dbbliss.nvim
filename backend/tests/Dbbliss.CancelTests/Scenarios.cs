@@ -27,6 +27,8 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
         if (profile.BatchThenSleepSql is not null) yield return ("batch_cancel_keeps_results", BatchCancelKeepsResults);
         yield return ("streaming_cancel", StreamingCancel);
         yield return ("streaming_cancel_stalled_client", StreamingCancelStalledClient);
+        yield return ("paged_cancel", PagedCancel);
+        yield return ("export_cancel", ExportCancel);
         yield return ("tx_cancel", () => TransactionCancel("tx_cancel", xactAbort: false));
         if (profile.Engine == "sqlserver") yield return ("tx_cancel_xact_abort", () => TransactionCancel("tx_cancel_xact_abort", xactAbort: true));
         if (profile.SupportsServerTransactionView)
@@ -218,6 +220,70 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
         var status = done["params"]!["status"]!.GetValue<string>();
         var detail = $"done={status} server stopped while client stalled: {(stopMs is null ? "NO" : "yes")} server: {view.Detail}";
         return Result("streaming_cancel_stalled_client", status == "cancelled" && stopMs is not null ? Outcome.Pass : Outcome.Fail, detail, stopMs);
+    }
+
+    /// <summary>
+    /// Phase 1 M2: a query with a row window sends the window and pauses; the server is held by TCP
+    /// backpressure, not finished. The cancel must stop it from there.
+    /// </summary>
+    private async Task<ScenarioResult> PagedCancel()
+    {
+        await using var observer = await profile.OpenObserverAsync();
+        var (c, connId, session) = await StartAsync();
+        await using var _ = c;
+        const int window = 1000;
+        await c.RequestAsync("execute", new JsonObject { ["connection_id"] = connId, ["query_id"] = "q", ["sql"] = profile.StreamingSql, ["window"] = window });
+        await c.WaitNotificationAsync(n => n["method"]?.GetValue<string>() == "query/paused", ExecutingTimeoutMs);
+        await Task.Delay(1500); // a query that was only pretending to pause would keep sending
+        var rowsWhilePaused = c.RowsReceived("q");
+        var stillRunning = (await profile.ViewAsync(observer, session)).Executing;
+
+        var sw = Stopwatch.StartNew();
+        await c.RequestAsync("cancel", new JsonObject { ["query_id"] = "q" });
+        var done = await c.WaitDoneAsync("q", DoneTimeoutMs);
+        var (stopMs, view) = await WaitStoppedAsync(observer, session, sw);
+        var status = done["params"]!["status"]!.GetValue<string>();
+        var ok = status == "cancelled" && stopMs is not null && rowsWhilePaused == window && stillRunning;
+        return Result("paged_cancel", ok ? Outcome.Pass : Outcome.Fail,
+            $"done={status} rows_while_paused={rowsWhilePaused} (window {window}) server_busy_while_paused={stillRunning} server: {view.Detail}", stopMs);
+    }
+
+    /// <summary>
+    /// Phase 1 M2: an export of a huge result goes to a file without Neovim, and a cancel stops it
+    /// with the file as far as it got, reported as incomplete.
+    /// </summary>
+    private async Task<ScenarioResult> ExportCancel()
+    {
+        await using var observer = await profile.OpenObserverAsync();
+        var (c, connId, session) = await StartAsync();
+        await using var _ = c;
+        var dir = Directory.CreateTempSubdirectory("dbbliss-export-");
+        var path = Path.Combine(dir.FullName, "out.csv");
+        try
+        {
+            await c.RequestAsync("execute", new JsonObject
+            {
+                ["connection_id"] = connId, ["query_id"] = "q", ["sql"] = profile.StreamingSql, ["export"] = new JsonObject { ["path"] = path },
+            });
+            await Task.Delay(1500);
+            var sizeBefore = new FileInfo(path).Length;
+
+            var sw = Stopwatch.StartNew();
+            await c.RequestAsync("cancel", new JsonObject { ["query_id"] = "q" });
+            var done = (await c.WaitDoneAsync("q", DoneTimeoutMs))["params"]!;
+            var (stopMs, view) = await WaitStoppedAsync(observer, session, sw);
+            var status = done["status"]!.GetValue<string>();
+            var export = done["export"];
+            var complete = export?["complete"]?.GetValue<bool>();
+            var sentToClient = c.RowsReceived("q");
+            var ok = status == "cancelled" && stopMs is not null && complete == false && sizeBefore > 0 && sentToClient == 0;
+            return Result("export_cancel", ok ? Outcome.Pass : Outcome.Fail,
+                $"done={status} file_bytes_before_cancel={sizeBefore} rows_written={export?["rows"]} complete={complete} rows_to_client={sentToClient} server: {view.Detail}", stopMs);
+        }
+        finally
+        {
+            dir.Delete(recursive: true);
+        }
     }
 
     /// <summary>

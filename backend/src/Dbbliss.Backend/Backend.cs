@@ -155,6 +155,7 @@ public sealed class Backend
             "script/split" => new Reply(SplitScript(p)),
             "execute" => Execute(p),
             "cancel" => new Reply(Cancel(p)),
+            "fetch" => new Reply(Fetch(p)),
             "transaction/begin" => await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)),
             "transaction/commit" => await TransactionAsync(p, (s, ct) => s.CommitAsync(ct)),
             "transaction/rollback" => await TransactionAsync(p, (s, ct) => s.RollbackAsync(ct)),
@@ -253,13 +254,34 @@ public sealed class Backend
         var connection = GetConnection(p);
         var sql = Str(p, "sql");
         var lineOffset = p["line_offset"]?.GetValue<int>() ?? 0;
+        var window = p["window"]?.GetValue<long>();
+        if (window is < 1) throw new RpcException(RpcErrors.InvalidParams, "window must be at least 1.");
+        var exportPath = p["export"]?["path"]?.GetValue<string>();
+        if (exportPath is not null && window is not null)
+        {
+            throw new RpcException(RpcErrors.InvalidParams, "An export has no window: it writes the whole result.");
+        }
         var queryId = p["query_id"]?.GetValue<string>() ?? Guid.NewGuid().ToString("N");
         var lease = connection.TryAcquire()
             ?? throw new RpcException(RpcErrors.ConnectionBusy, $"Connection {connection.Id} is already running a query.");
-        var run = new QueryRun(queryId, connection, new QueryControl(queryId), lineOffset);
+        CsvExport? export = null;
+        if (exportPath is not null)
+        {
+            try
+            {
+                export = new CsvExport(exportPath, p["export"]?["overwrite"]?.GetValue<bool>() ?? false);
+            }
+            catch
+            {
+                lease.Dispose();
+                throw;
+            }
+        }
+        var run = new QueryRun(queryId, connection, new QueryControl(queryId), lineOffset, window, export);
         if (!_queries.TryAdd(queryId, run))
         {
             lease.Dispose();
+            if (export is not null) _ = export.DisposeAsync().AsTask();
             throw new RpcException(RpcErrors.InvalidParams, $"Query id {queryId} is already in use.");
         }
         // The query starts after the response is written, so the client always sees the
@@ -272,7 +294,9 @@ public sealed class Backend
         await Task.Yield();
         var connection = run.Connection;
         var control = run.Control;
-        var streamer = new ResultStreamer(_output, run.QueryId, control.Token);
+        var export = run.Export;
+        var streamer = export is null ? new ResultStreamer(_output, run.QueryId, control.Token, run.Window) : null;
+        IResultSink sink = export is not null ? export : streamer!;
         connection.CurrentStreamer = streamer;
         string status;
         ErrorInfo? error = null;
@@ -280,7 +304,7 @@ public sealed class Backend
         try
         {
             control.Token.ThrowIfCancellationRequested();
-            var summary = await connection.Session.ExecuteAsync(sql, streamer, control);
+            var summary = await connection.Session.ExecuteAsync(sql, sink, control);
             status = "completed";
             rowsAffected = summary.RowsAffected;
         }
@@ -297,10 +321,22 @@ public sealed class Backend
         var elapsed = control.Elapsed.ElapsedMilliseconds;
         try
         {
-            await streamer.DisposeAsync();
+            if (streamer is not null) await streamer.DisposeAsync();
+            if (export is not null)
+            {
+                export.Complete = status == "completed";
+                await export.DisposeAsync();
+            }
         }
-        catch (IOException)
+        catch (IOException ex)
         {
+            if (export is not null && status == "completed")
+            {
+                // The file is short: the export did not complete, whatever the query did.
+                export.Complete = false;
+                status = "error";
+                error = new ErrorInfo($"Writing {export.Path} failed: {ex.Message}");
+            }
         }
         connection.CurrentStreamer = null;
 
@@ -326,10 +362,20 @@ public sealed class Backend
             if (error.Line is { } line) json["buffer_line"] = run.LineOffset + line;
             done["error"] = json;
         }
-        if (streamer.TruncatedRows > 0)
+        if (streamer is { TruncatedRows: > 0 })
         {
             // Reported loss only: rows past the post-cancel overflow cap.
             done["truncated_rows"] = streamer.TruncatedRows;
+        }
+        if (export is not null)
+        {
+            done["export"] = new JsonObject
+            {
+                ["path"] = export.Path,
+                ["rows"] = export.Rows,
+                ["complete"] = export.Complete,
+                ["ignored_result_sets"] = export.IgnoredResultSets,
+            };
         }
         Log.Info($"query {run.QueryId} {status} after {elapsed} ms");
         var released = false;
@@ -383,6 +429,19 @@ public sealed class Backend
         Log.Info($"query {queryId}: cancel sent");
         _ = WatchCancelAsync(run);
         return new JsonObject { ["query_id"] = queryId, ["state"] = "cancel_sent" };
+    }
+
+    /// <summary>Allows a paused (or about to be paused) query to send more rows.</summary>
+    private JsonObject Fetch(JsonObject p)
+    {
+        var queryId = Str(p, "query_id");
+        var rows = p["rows"]?.GetValue<long>() ?? throw new RpcException(RpcErrors.InvalidParams, "Missing parameter rows.");
+        if (rows < 1) throw new RpcException(RpcErrors.InvalidParams, "rows must be at least 1.");
+        if (!_queries.TryGetValue(queryId, out var run) || run.Connection.CurrentStreamer is not { } streamer)
+        {
+            return new JsonObject { ["query_id"] = queryId, ["state"] = "not_running" };
+        }
+        return new JsonObject { ["query_id"] = queryId, ["state"] = "granted", ["granted"] = streamer.Grant(rows) };
     }
 
     private async Task WatchCancelAsync(QueryRun run)
@@ -560,9 +619,11 @@ public sealed class Backend
         return error with { Line = line };
     }
 
-    private sealed class QueryRun(string queryId, Connection connection, QueryControl control, int lineOffset)
+    private sealed class QueryRun(string queryId, Connection connection, QueryControl control, int lineOffset, long? window, CsvExport? export)
     {
         public int LineOffset { get; } = lineOffset;
+        public long? Window { get; } = window;
+        public CsvExport? Export { get; } = export;
         public string QueryId { get; } = queryId;
         public Connection Connection { get; } = connection;
         public QueryControl Control { get; } = control;

@@ -27,6 +27,11 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("splitter_cases", "", () => { SplitterCases.Run(); return Task.CompletedTask; }),
     ("script_split_rpc", "", ScriptSplitRpc),
     ("error_line_in_buffer", "", ErrorLineInBuffer),
+    ("paging_pauses_and_fetch_resumes", "", PagingPausesAndFetchResumes),
+    ("paused_query_cancels_without_loss", "", PausedQueryCancelsWithoutLoss),
+    ("paging_without_window_streams_all", "", PagingWithoutWindowStreamsAll),
+    ("export_writes_csv", "", ExportWritesCsv),
+    ("export_refuses_existing_file", "", ExportRefusesExistingFile),
 };
 
 var failed = 0;
@@ -252,6 +257,138 @@ static async Task ErrorLineInBuffer()
         {
             throw new TestFailure($"{sql.Replace("\n", "\\n")} at offset {offset}: expected line {line} and buffer line {bufferLine}, got {error?.ToJsonString()}");
         }
+    }
+}
+
+static int RowsReceived(Harness h, string queryId) =>
+    h.Messages.Where(m => m["method"]?.GetValue<string>() == "query/rows" && m["params"]?["query_id"]?.GetValue<string>() == queryId)
+        .Sum(m => m["params"]!["rows"]!.AsArray().Count);
+
+static async Task<JsonObject> WaitPausedAsync(Harness h, string queryId, int count)
+{
+    var seen = 0;
+    var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(5);
+    while (DateTime.UtcNow < deadline)
+    {
+        var paused = h.Messages.Where(m => m["method"]?.GetValue<string>() == "query/paused" && m["params"]?["query_id"]?.GetValue<string>() == queryId).ToArray();
+        seen = paused.Length;
+        if (seen >= count) return paused[count - 1];
+        await Task.Delay(20);
+    }
+    throw new TestFailure($"expected {count} query/paused for {queryId}, saw {seen}");
+}
+
+// Pull paging: the query sends its window and pauses; each fetch lets more through; nothing is lost
+// and query/done comes only after the last row.
+static async Task PagingPausesAndFetchResumes()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q1", ["sql"] = "ROWS 3000", ["window"] = 1000 });
+    var paused = await WaitPausedAsync(h, "q1", 1);
+    if (paused["params"]!["rows_sent"]!.GetValue<long>() != 1000) throw new TestFailure($"paused after {paused["params"]!["rows_sent"]} rows, expected 1000");
+    await Task.Delay(300);
+    if (RowsReceived(h, "q1") != 1000) throw new TestFailure($"{RowsReceived(h, "q1")} rows arrived while paused, expected 1000");
+    if (h.Messages.Any(m => m["method"]?.GetValue<string>() == "query/done")) throw new TestFailure("query/done arrived while paused");
+
+    var granted = await h.ResultAsync("fetch", new JsonObject { ["query_id"] = "q1", ["rows"] = 1000 });
+    if (granted["state"]?.GetValue<string>() != "granted") throw new TestFailure($"fetch: {granted.ToJsonString()}");
+    await WaitPausedAsync(h, "q1", 2);
+    await Task.Delay(300);
+    if (RowsReceived(h, "q1") != 2000) throw new TestFailure($"{RowsReceived(h, "q1")} rows after the first fetch, expected 2000");
+
+    await h.ResultAsync("fetch", new JsonObject { ["query_id"] = "q1", ["rows"] = 5000 });
+    var done = await h.NotificationAsync("query/done", "q1");
+    if (done["params"]!["status"]!.GetValue<string>() != "completed") throw new TestFailure($"status {done["params"]!["status"]}");
+    if (RowsReceived(h, "q1") != 3000) throw new TestFailure($"{RowsReceived(h, "q1")} rows in the end, expected 3000");
+    var late = await h.ResultAsync("fetch", new JsonObject { ["query_id"] = "q1", ["rows"] = 10 });
+    if (late["state"]?.GetValue<string>() != "not_running") throw new TestFailure($"fetch after the end: {late.ToJsonString()}");
+}
+
+// A paused query is cancelled like any other: the cancel ends the credit wait, the rest drains, and
+// every row the server sent is either delivered or reported as truncated (NoSilentLoss).
+static async Task PausedQueryCancelsWithoutLoss()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    const int total = 50_000;
+    await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q1", ["sql"] = $"ROWS {total}", ["window"] = 500 });
+    await WaitPausedAsync(h, "q1", 1);
+    await h.ResultAsync("cancel", new JsonObject { ["query_id"] = "q1" });
+    var done = (await h.NotificationAsync("query/done", "q1"))["params"]!;
+    var status = done["status"]!.GetValue<string>();
+    var truncated = done["truncated_rows"]?.GetValue<long>() ?? 0;
+    var received = RowsReceived(h, "q1");
+    // The fake finishes its n rows whatever the cancel, so the status can also be "completed" when
+    // the cancel arrives after the last row; either way no row may vanish.
+    if (status is not ("cancelled" or "completed")) throw new TestFailure($"status {status}");
+    if (received + truncated != total) throw new TestFailure($"{received} delivered + {truncated} truncated != {total} sent (silent loss)");
+}
+
+// No window: today's behaviour, everything streams.
+static async Task PagingWithoutWindowStreamsAll()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q1", ["sql"] = "ROWS 5000" });
+    await h.NotificationAsync("query/done", "q1");
+    if (RowsReceived(h, "q1") != 5000) throw new TestFailure($"{RowsReceived(h, "q1")} rows, expected 5000");
+    if (h.Messages.Any(m => m["method"]?.GetValue<string>() == "query/paused")) throw new TestFailure("a query without a window paused");
+}
+
+static string TempCsv() => Path.Combine(Directory.CreateTempSubdirectory("dbbliss-export-").FullName, "out.csv");
+
+// The backend writes the file; NULL is empty, quotes are doubled, and rows never go through Neovim.
+static async Task ExportWritesCsv()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    var path = TempCsv();
+    try
+    {
+        await h.ResultAsync("execute", new JsonObject
+        {
+            ["connection_id"] = c, ["query_id"] = "q1", ["sql"] = "ROWS 3", ["export"] = new JsonObject { ["path"] = path },
+        });
+        var done = (await h.NotificationAsync("query/done", "q1"))["params"]!;
+        var export = done["export"];
+        if (export?["complete"]?.GetValue<bool>() != true || export["rows"]?.GetValue<long>() != 3) throw new TestFailure($"export info: {export?.ToJsonString()}");
+        if (RowsReceived(h, "q1") != 0) throw new TestFailure("an export sent rows to the client");
+        var text = File.ReadAllText(path);
+        const string expected = "id,v,n,q\r\n1,v1,,\"q\"\"x\"\r\n2,v2,,\"q\"\"x\"\r\n3,v3,,\"q\"\"x\"\r\n";
+        if (text != expected) throw new TestFailure($"file is {text.Replace("\r", "\\r").Replace("\n", "\\n")}");
+    }
+    finally
+    {
+        Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+    }
+}
+
+static async Task ExportRefusesExistingFile()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    var path = TempCsv();
+    try
+    {
+        File.WriteAllText(path, "precious");
+        var refused = await h.CallAsync("execute", new JsonObject
+        {
+            ["connection_id"] = c, ["query_id"] = "q1", ["sql"] = "ROWS 1", ["export"] = new JsonObject { ["path"] = path },
+        });
+        ExpectError(refused, RpcErrors.InvalidParams, "export over an existing file");
+        if (File.ReadAllText(path) != "precious") throw new TestFailure("the existing file was changed");
+        // The refusal released the connection.
+        await h.ResultAsync("execute", new JsonObject
+        {
+            ["connection_id"] = c, ["query_id"] = "q2", ["sql"] = "ROWS 1", ["export"] = new JsonObject { ["path"] = path, ["overwrite"] = true },
+        });
+        await h.NotificationAsync("query/done", "q2");
+        if (File.ReadAllText(path) != "id,v,n,q\r\n1,v1,,\"q\"\"x\"\r\n") throw new TestFailure("overwrite did not write the export");
+    }
+    finally
+    {
+        Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
     }
 }
 

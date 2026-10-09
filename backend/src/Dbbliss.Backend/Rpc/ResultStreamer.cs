@@ -19,6 +19,13 @@ namespace Dbbliss.Backend.Rpc;
 /// still in flight after a cancel is bounded by socket buffers, so this is bounded memory in
 /// practice; past <see cref="OverflowRowCap"/> rows are dropped and reported as truncated.
 /// Nothing is ever dropped silently: never throw away rows by unwinding the driver's reader.
+///
+/// Pull paging (<see cref="Grant"/>): the client allows a number of rows at a time. When they are
+/// used up the query thread flushes what it has, tells the client (query/paused) and waits, exactly
+/// like a wait for a page slot: the driver stops reading, the socket fills and the server is paused
+/// by TCP backpressure. A cancel ends the wait (CancelWake) and the rest of the result drains
+/// through the overflow path as before, so a paused query is cancelled like any other. A client
+/// that never fetches costs a paused query, not memory.
 /// </summary>
 public sealed class ResultStreamer : IResultSink, IAsyncDisposable
 {
@@ -37,6 +44,10 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
     private readonly CancellationTokenSource _timerStop = new();
     private readonly Task _pump;
     private readonly Task _timer;
+    private readonly SemaphoreSlim? _credit;
+    private long _accepted;
+    private long _granted;
+    private bool _pauseAnnounced;
     private JsonArray _page = [];
     private int _pageSet = -1;
     private long _overflowRows;
@@ -44,11 +55,17 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
 
     private readonly record struct Item(string Method, JsonObject Params, bool HoldsSlot, int OverflowRows);
 
-    public ResultStreamer(Output output, string queryId, CancellationToken queryToken)
+    /// <param name="window">Rows the client allows up front; null for no limit (no pull paging).</param>
+    public ResultStreamer(Output output, string queryId, CancellationToken queryToken, long? window = null)
     {
         _output = output;
         _queryId = queryId;
         _queryToken = queryToken;
+        if (window is { } w)
+        {
+            _credit = new SemaphoreSlim(0, int.MaxValue);
+            Grant(w);
+        }
         _pump = Task.Run(PumpAsync);
         _timer = Task.Run(TimerAsync);
     }
@@ -67,12 +84,27 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
         });
     }
 
+    /// <summary>Allows <paramref name="rows"/> more rows to be sent. Returns the total allowed so far.</summary>
+    public long Grant(long rows)
+    {
+        if (_credit is null || rows <= 0) return Interlocked.Read(ref _granted);
+        var granted = Interlocked.Add(ref _granted, rows);
+        while (rows > 0)
+        {
+            var step = (int)Math.Min(rows, 1 << 30);
+            _credit.Release(step);
+            rows -= step;
+        }
+        return granted;
+    }
+
     public async ValueTask RowAsync(int index, JsonArray row)
     {
         await WithLockAsync(async () =>
         {
             if (_pageSet != index) await FlushLockedAsync();
             _pageSet = index;
+            await AcquireCreditAsync();
             _page.Add(row);
             if (_page.Count >= PageSize) await FlushLockedAsync();
         });
@@ -115,6 +147,38 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
     {
         item.Params["query_id"] = _queryId;
         _queue.Writer.TryWrite(item);
+    }
+
+    /// <summary>
+    /// Takes one row's credit. Out of credit: hand over what is held, tell the client once, and wait
+    /// for a grant. A cancel ends the wait and rows go on without credit (CancelWake), so the
+    /// server can finish; those rows are not dropped.
+    /// </summary>
+    private async Task AcquireCreditAsync()
+    {
+        if (_credit is null) return;
+        _accepted++;
+        if (_credit.Wait(0))
+        {
+            _pauseAnnounced = false;
+            return;
+        }
+        if (_queryToken.IsCancellationRequested) return;
+        await FlushLockedAsync();
+        if (!_pauseAnnounced)
+        {
+            _pauseAnnounced = true;
+            Enqueue(new Item("query/paused", new JsonObject { ["rows_sent"] = _accepted - 1 }, false, 0));
+        }
+        try
+        {
+            await _credit.WaitAsync(_queryToken);
+            _pauseAnnounced = false;
+        }
+        catch (OperationCanceledException)
+        {
+            // CancelWake: carry on without credit.
+        }
     }
 
     /// <summary>
@@ -222,5 +286,6 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
         _timerStop.Dispose();
         _lock.Dispose();
         _slots.Dispose();
+        _credit?.Dispose();
     }
 }
