@@ -164,6 +164,13 @@ public static class FailureCases
             await h.ResultAsync("execute", new JsonObject { ["connection_id"] = other, ["query_id"] = "free", ["sql"] = "SELECT 1" });
             await h.NotificationAsync("query/done", "free");
 
+            // An export without a path, or that is not an object, is refused instead of being ignored.
+            foreach (var options in new JsonNode?[] { new JsonObject(), JsonValue.Create("out.csv"), new JsonObject { ["path"] = "" } })
+            {
+                var refused = await h.CallAsync("execute", new JsonObject { ["connection_id"] = other, ["query_id"] = "nopath", ["sql"] = "SELECT 1", ["export"] = options });
+                if (refused["error"]?["code"]?.GetValue<int>() != RpcErrors.InvalidParams) throw new TestFailure($"export {options?.ToJsonString()}: " + refused.ToJsonString());
+            }
+
             // A path that cannot be written: the execute fails and the connection is free.
             var bad = await h.CallAsync("execute", new JsonObject
             {

@@ -12,7 +12,9 @@ union: the report can only understate coverage, never overstate it.
 
 Gate (docs/assurance/coverage-policy.json):
   critical files  every line not hit and every branch not taken must be justified in
-                  docs/assurance/coverage-justifications.json, else the gate fails.
+                  docs/assurance/coverage-justifications.json, else the gate fails. An entry names
+                  its code by a snippet that must occur on exactly one line of the file ("match"),
+                  plus lines before/after it, so edits elsewhere do not move it.
   ratchet         per file, statement and decision percentages may not fall below the baseline.
   A justification that no longer matches an uncovered item is itself an error, so the list cannot rot.
 
@@ -113,10 +115,25 @@ def read_luacov(report):
     }
 
 
-def justification_index():
+def justification_index(problems):
+    """-> [(file, from_line, to_line, kind, reason)], with snippets resolved against the current source."""
     if not JUSTIFICATIONS.exists():
         return []
-    return json.loads(JUSTIFICATIONS.read_text())["justifications"]
+    resolved = []
+    for j in json.loads(JUSTIFICATIONS.read_text())["justifications"]:
+        path = ROOT / j["file"]
+        lines = path.read_text(errors="replace").splitlines() if path.exists() else []
+        hits = [i + 1 for i, text in enumerate(lines) if j["match"] in text]
+        label = f"{j['file']} `{j['match'][:50]}`"
+        if len(hits) != 1:
+            problems.append(f"justification {label} matches {len(hits)} lines, expected exactly 1")
+            continue
+        if not j.get("reason", "").strip():
+            problems.append(f"justification {label} has no reason")
+            continue
+        at = hits[0]
+        resolved.append((j["file"], at - j.get("before", 0), at + j.get("after", 0), j["kind"], j["reason"], label))
+    return resolved
 
 
 def main():
@@ -129,7 +146,7 @@ def main():
     problems = []
 
     # --- critical files: every miss justified ------------------------------------------------
-    js = justification_index()
+    js = justification_index(problems)
     used = set()
     unjustified = {}
     for f in policy.get("critical", []):
@@ -141,7 +158,7 @@ def main():
             for n in info.get(key, []):
                 hit = next(
                     (i for i, j in enumerate(js)
-                     if j["file"] == f and j["from"] <= n <= j["to"] and j["kind"] in (kind, "both")),
+                     if j[0] == f and j[1] <= n <= j[2] and j[3] in (kind, "both")),
                     None,
                 )
                 if hit is None:
@@ -151,9 +168,9 @@ def main():
     for f, items in unjustified.items():
         shown = ", ".join(f"{k} {n}" for k, n in items[:25]) + (" ..." if len(items) > 25 else "")
         problems.append(f"{f}: {len(items)} uncovered item(s) without justification: {shown}")
-    stale = [j for i, j in enumerate(js) if i not in used and j["file"] in policy.get("critical", [])]
-    for j in stale:
-        problems.append(f"stale justification (nothing uncovered there any more): {j['file']}:{j['from']}-{j['to']} {j['kind']}")
+    for i, j in enumerate(js):
+        if i not in used and j[0] in policy.get("critical", []):
+            problems.append(f"stale justification (nothing uncovered there any more): {j[5]} ({j[3]})")
 
     # --- ratchet ----------------------------------------------------------------------------
     baseline = json.loads(BASELINE.read_text()) if BASELINE.exists() else {}

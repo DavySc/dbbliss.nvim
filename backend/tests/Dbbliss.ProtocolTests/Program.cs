@@ -35,6 +35,8 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("requests_are_refused_while_shutting_down", "", RobustnessCases.RequestsAreRefusedWhileShuttingDown),
     // Verifies: HLR-CANCEL-1, HLR-CANCEL-5
     ("query_control_cases", "", () => { UnitCases.QueryControl(); return Task.CompletedTask; }),
+    // Verifies: LLR-WIRE-5
+    ("output_without_a_listener", "", UnitCases.OutputWithoutAListener),
     // Verifies: LLR-CAT-6
     ("identifier_quoting_round_trips", "", () => { UnitCases.IdentifierQuoting(); return Task.CompletedTask; }),
     // Verifies: LLR-CRED-2, HLR-CRED-1

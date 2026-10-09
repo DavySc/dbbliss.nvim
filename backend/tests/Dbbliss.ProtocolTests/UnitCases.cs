@@ -56,6 +56,38 @@ public static class UnitCases
         angry.RefireProtocolCancel();
     }
 
+    // Output with nobody listening for a broken stdout still fails the write, every time, without throwing anything else.
+    public static async Task OutputWithoutAListener()
+    {
+        var output = new Output(new BrokenStream());
+        for (var i = 0; i < 2; i++)
+        {
+            try
+            {
+                await output.NotifyAsync("x", new JsonObject());
+                throw new TestFailure("a write to a closed stdout succeeded");
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
+
+    private sealed class BrokenStream : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new IOException("closed (simulated)");
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException("closed (simulated)");
+    }
+
     public static void IdentifierQuoting()
     {
         Check(ObjectNames.QuoteIdent("plain") == "\"plain\"", "plain identifier");
@@ -110,6 +142,40 @@ public static class UnitCases
         catch (RpcException ex)
         {
             Check(ex.Code == RpcErrors.CredentialNotFound && ex.Message.Contains("may not exist", StringComparison.Ordinal), $"silent tool failure: {ex.Message}");
+        }
+
+        // A real tool: its first line is the password, a failing one reports its own message.
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
+        {
+            var toolDir = Directory.CreateTempSubdirectory("dbbliss-tool-");
+            var oldPath = Environment.GetEnvironmentVariable("PATH");
+            try
+            {
+                var tool = Path.Combine(toolDir.FullName, "pass");
+                void Install(string body)
+                {
+                    File.WriteAllText(tool, "#!/bin/sh\n" + body + "\n");
+                    File.SetUnixFileMode(tool, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+                }
+                Environment.SetEnvironmentVariable("PATH", toolDir.FullName + Path.PathSeparator + oldPath);
+                Install("printf 'from-script\\nsecond\\n'");
+                Check(Credentials.Resolve(new JsonObject { ["pass"] = "x" }) == "from-script", "a real tool's first line is not the password");
+                Install("echo 'no such entry' >&2; exit 3");
+                try
+                {
+                    Credentials.Resolve(new JsonObject { ["pass"] = "x" });
+                    throw new TestFailure("a failing real tool gave a password");
+                }
+                catch (RpcException ex)
+                {
+                    Check(ex.Message.Contains("no such entry", StringComparison.Ordinal) && ex.Message.Contains("exited with 3", StringComparison.Ordinal), "failing real tool: " + ex.Message);
+                }
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("PATH", oldPath);
+                toolDir.Delete(recursive: true);
+            }
         }
 
         // A tool that does not answer is killed and reported (a passphrase prompt that nobody sees).

@@ -273,7 +273,17 @@ public sealed class Backend
         var lineOffset = p["line_offset"]?.GetValue<int>() ?? 0;
         var window = p["window"]?.GetValue<long>();
         if (window is < 1) throw new RpcException(RpcErrors.InvalidParams, "window must be at least 1.");
-        var exportPath = p["export"]?["path"]?.GetValue<string>();
+        var exportOptions = p["export"] switch
+        {
+            null => null,
+            JsonObject o => o,
+            _ => throw new RpcException(RpcErrors.InvalidParams, "export must be an object with a path."),
+        };
+        var exportPath = exportOptions is null
+            ? null
+            : exportOptions["path"]?.GetValue<string>() is { Length: > 0 } path
+                ? path
+                : throw new RpcException(RpcErrors.InvalidParams, "Missing parameter export.path.");
         if (exportPath is not null && window is not null)
         {
             throw new RpcException(RpcErrors.InvalidParams, "An export has no window: it writes the whole result.");
@@ -286,7 +296,7 @@ public sealed class Backend
         {
             try
             {
-                export = new CsvExport(exportPath, p["export"]?["overwrite"]?.GetValue<bool>() ?? false);
+                export = new CsvExport(exportPath, exportOptions!["overwrite"]?.GetValue<bool>() ?? false);
             }
             catch
             {
@@ -336,23 +346,23 @@ public sealed class Backend
         }
         control.MarkFinished();
         var elapsed = control.Elapsed.ElapsedMilliseconds;
-        try
+        if (streamer is not null) await streamer.DisposeAsync();
+        if (export is not null)
         {
-            if (streamer is not null) await streamer.DisposeAsync();
-            if (export is not null)
+            export.Complete = status == "completed";
+            try
             {
-                export.Complete = status == "completed";
                 await export.DisposeAsync();
             }
-        }
-        catch (IOException ex)
-        {
-            if (export is not null && status == "completed")
+            catch (IOException ex)
             {
-                // The file is short: the export did not complete, whatever the query did.
+                // The rest of the file could not be written. A query that already failed or was cancelled keeps its own outcome.
                 export.Complete = false;
-                status = "error";
-                error = new ErrorInfo($"Writing {export.Path} failed: {ex.Message}");
+                if (status == "completed")
+                {
+                    status = "error";
+                    error = new ErrorInfo($"Writing {export.Path} failed: {ex.Message}");
+                }
             }
         }
         connection.CurrentStreamer = null;
@@ -513,46 +523,53 @@ public sealed class Backend
         }
         try
         {
-            if (connection.CatalogSession is null)
-            {
-                IEngineSession session;
-                try
-                {
-                    session = await connection.Engine.OpenAsync(connection.Spec, new DiscardMessages(), timeout.Token);
-                    await catalog.PrepareAsync(session, timeout.Token);
-                }
-                catch (Exception ex) when (ex is not (RpcException or OperationCanceledException))
-                {
-                    throw DatabaseError(connection.Engine, ex);
-                }
-                connection.CatalogSession = session;
-                Log.Info($"connection {connection.Id}: catalog session open ({session.ServerSessionId})");
-            }
-            try
-            {
-                var result = await work(catalog, connection.CatalogSession, timeout.Token);
-                // Which server session answered: a tool that watches the server can tell it from the user's.
-                result["catalog_session"] = connection.CatalogSession.ServerSessionId;
-                return result;
-            }
-            catch (CatalogException ex)
-            {
-                throw new RpcException(RpcErrors.Catalog, ex.Message);
-            }
-            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
-            {
-                await connection.CloseCatalogLockedAsync();
-                throw new RpcException(RpcErrors.Database, $"The catalog query did not finish within {CatalogTimeout.TotalSeconds:0} s.");
-            }
-            catch (Exception ex) when (ex is not RpcException)
-            {
-                await connection.CloseCatalogLockedAsync();
-                throw DatabaseError(connection.Engine, ex);
-            }
+            return await CatalogLockedAsync(connection, catalog, work, timeout);
         }
         finally
         {
             connection.CatalogLock.Release();
+        }
+    }
+
+    /// <summary>The catalog operation itself, with the connection's catalog lock held by the caller.</summary>
+    private async Task<JsonObject> CatalogLockedAsync(Connection connection, ICatalog catalog,
+        Func<ICatalog, IEngineSession, CancellationToken, Task<JsonObject>> work, CancellationTokenSource timeout)
+    {
+        if (connection.CatalogSession is null)
+        {
+            IEngineSession session;
+            try
+            {
+                session = await connection.Engine.OpenAsync(connection.Spec, new DiscardMessages(), timeout.Token);
+                await catalog.PrepareAsync(session, timeout.Token);
+            }
+            catch (Exception ex) when (ex is not (RpcException or OperationCanceledException))
+            {
+                throw DatabaseError(connection.Engine, ex);
+            }
+            connection.CatalogSession = session;
+            Log.Info($"connection {connection.Id}: catalog session open ({session.ServerSessionId})");
+        }
+        try
+        {
+            var result = await work(catalog, connection.CatalogSession, timeout.Token);
+            // Which server session answered: a tool that watches the server can tell it from the user's.
+            result["catalog_session"] = connection.CatalogSession.ServerSessionId;
+            return result;
+        }
+        catch (CatalogException ex)
+        {
+            throw new RpcException(RpcErrors.Catalog, ex.Message);
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            await connection.CloseCatalogLockedAsync();
+            throw new RpcException(RpcErrors.Database, $"The catalog query did not finish within {CatalogTimeout.TotalSeconds:0} s.");
+        }
+        catch (Exception ex) when (ex is not RpcException)
+        {
+            await connection.CloseCatalogLockedAsync();
+            throw DatabaseError(connection.Engine, ex);
         }
     }
 
@@ -805,7 +822,7 @@ public sealed class Backend
                 ["text"] = text,
                 ["number"] = number,
                 ["line"] = line,
-            }).ContinueWith(t => Log.Warn($"connection/message lost: {t.Exception?.GetBaseException().Message}"),
+            }).ContinueWith(t => Log.Warn($"connection/message lost: {t.Exception!.GetBaseException().Message}"),
                 TaskContinuationOptions.OnlyOnFaulted);
         }
     }

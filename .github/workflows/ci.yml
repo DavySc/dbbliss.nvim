@@ -217,9 +217,17 @@ jobs:
           python3 scripts/assurance/trace.py --check
           cat docs/assurance/traceability.md >> "$GITHUB_STEP_SUMMARY"
       - name: Coverage report and gate
+        id: gate
         run: |
-          python3 scripts/assurance/coverage_report.py ${{ vars.ASSURANCE_ENFORCE == '1' && '--check' || '' }}
+          code=0
+          python3 scripts/assurance/coverage_report.py --check || code=$?
           cat coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit $code
+      - name: Baseline values (commit them to docs/assurance/coverage-baseline.json when they are the intended floor)
+        if: always()
+        run: |
+          python3 scripts/assurance/coverage_report.py --update-baseline > /dev/null
+          cat docs/assurance/coverage-baseline.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:

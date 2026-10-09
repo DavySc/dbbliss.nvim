@@ -100,7 +100,9 @@ The client shall refuse `connect` for a name that is connected or connecting. So
 ### HLR-DATA-1
 Values shall reach the client without loss or reinterpretation: 64-bit integers beyond 2^53,
 decimals and floats that a Lua double cannot hold travel as strings, binary as `0x` hex, dates and
-times in a fixed text format, independent of the machine's locale. Source: decision 10.
+times in a fixed text format, independent of the machine's locale; arrays, key-value maps and bit
+strings travel as their JSON or bit text, and any other type as its own text, never as the name of
+a .NET type. Source: decision 10; problem report PR-020.
 
 ### HLR-DATA-2
 When the client stops reading, the backend shall stop reading from the server after a bounded
@@ -200,7 +202,8 @@ a request without an id shall be performed without a response. Source: JSON-RPC 
 
 ### LLR-WIRE-2
 A request with a missing or invalid parameter (unknown engine, missing sql or text, a window below
-1, an export together with a window, fetch of fewer than 1 row, a query id already in use) shall get
+1, an export together with a window, an export without a path or that is not an object, fetch of
+fewer than 1 row, a query id already in use) shall get
 an invalid-params error that names the parameter; an unknown connection shall get its own error
 code; a request about a query that is not running shall get the answer `not_running`, not an error;
 a failed connect shall return the server's message as a database error and leave no session open.

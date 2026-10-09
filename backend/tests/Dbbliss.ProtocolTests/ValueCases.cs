@@ -68,6 +68,19 @@ public static class ValueCases
         Is("\"10.0.0.1\"", System.Net.IPAddress.Parse("10.0.0.1"));
         Is("\"http://example.test/a\"", new Uri("http://example.test/a")); // not formattable: its text
 
+        // Arrays, maps and bit strings: their text form, never the name of their .NET type.
+        Text("[1,2,3]", new[] { 1, 2, 3 });
+        Text("[\"h\u00e9llo \u2603\"]", new[] { "h\u00e9llo \u2603" }); // letters stay letters
+        Text("[\"x\",null,\"y\\\"z\"]", new string?[] { "x", null, "y\"z" });
+        Text("[\"9007199254740993\",5]", new[] { (1L << 53) + 1, 5L });
+        Text("[[1,2],[3,4]]", new[,] { { 1, 2 }, { 3, 4 } });
+        Text("[[1],[2,3]]", new[] { new[] { 1 }, new[] { 2, 3 } });
+        Text("[]", Array.Empty<int>());
+        Text("[\"0x01FF\"]", new[] { new byte[] { 1, 255 } }.Select(b => (object)b).ToArray());
+        Text("{\"a\":\"1\",\"b\":null,\"c\":[1,2]}", new Dictionary<string, object?> { ["a"] = "1", ["b"] = null, ["c"] = new[] { 1, 2 } });
+        Text("101", new System.Collections.BitArray(new[] { true, false, true }));
+        Text("opaque-text", new Opaque());
+
         // A whole row from a driver: NULL and DBNull become JSON null, the rest is converted.
         var table = new System.Data.DataTable();
         table.Columns.Add("id", typeof(int));
@@ -97,6 +110,21 @@ public static class ValueCases
         finally
         {
             Thread.CurrentThread.CurrentCulture = saved;
+        }
+    }
+
+    private sealed class Opaque
+    {
+        public override string ToString() => "opaque-text";
+    }
+
+    /// <summary>The cell is this text (a string cell).</summary>
+    private static void Text(string expected, object value)
+    {
+        var cell = ValueConverter.Convert(value);
+        if (cell is not JsonValue v || !v.TryGetValue<string>(out var actual) || actual != expected)
+        {
+            throw new TestFailure($"{value.GetType().Name}: expected the text {expected}, got {cell?.ToJsonString()}");
         }
     }
 

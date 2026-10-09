@@ -30,6 +30,8 @@ because they weaken the evidence.
 | PR-017 | CI | Test defect: the catalog-session-ended check read the server before it dropped the logged-out session (flake) | HLR-CAT-4 | the check waits, bounded to 5 s |
 | PR-018 | process | TLC trace files were committed by mistake | (process) | `.gitignore`; reviewed in `reviews/review-checklist.md` |
 | PR-019 | assurance (shutdown failure test) | A session whose close failed during shutdown was logged as "closed (any open transaction rolled back)": the close task's exception was never observed | HLR-TX-4 | the result is awaited and a failure is logged as such; `shutdown_closes_every_session_even_if_one_fails` |
+| PR-020 | assurance (coverage of `ValueConverter`, then a probe against PostgreSQL) | PostgreSQL array columns (and key-value maps, bit strings) were shown as `System.Int32[]`, `System.String[]`: the converter fell back to the .NET type name | HLR-DATA-1 | arrays, maps and bit strings are converted to text; `value_conversion_cases` |
+| PR-021 | assurance (coverage) | An `export` option without a path was silently ignored and the query ran without exporting | LLR-WIRE-2 | refused as invalid params; `execute_options` |
 
 ## Open
 

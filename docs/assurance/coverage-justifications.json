@@ -1,0 +1,55 @@
+{
+ "justifications": [
+  {
+   "file": "backend/src/Dbbliss.Backend/Backend.cs",
+   "match": "private JsonObject Initialize() => new()",
+   "kind": "branch",
+   "reason": "`Assembly.GetName().Version?.ToString()` guards a null version. A compiled assembly always has one, so the null side cannot occur."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Backend.cs",
+   "match": "Log.Error($\"shutdown: {ex}\");",
+   "before": 2,
+   "after": 1,
+   "kind": "line",
+   "reason": "Defensive catch-all of ShutdownAsync, whose `finally` still completes the shutdown. Every step inside it either handles its own failures (cancel, close, timeouts: tested in shutdown_is_bounded and shutdown_closes_every_session_even_if_one_fails) or cannot throw; no input is known to reach this handler. It exists so that an unforeseen bug is logged instead of lost in an unobserved task."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Credentials.cs",
+   "match": "using var process = Process.Start(info) ?? throw new FileNotFoundException(file);",
+   "kind": "branch",
+   "reason": "Process.Start returns null only when it reuses an already running process. With a new ProcessStartInfo for an executable file it starts a new process or throws, so the null side cannot occur."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Credentials.cs",
+   "match": "private static string FromCredentialManager(string target)",
+   "after": 31,
+   "kind": "both",
+   "reason": "Windows Credential Manager (CredReadW). Platform-specific: the Windows CI job runs it for real (credential_manager_windows, and the end-to-end test through Credential Manager) but is not instrumented, because the coverage tools run on Linux only. Off Windows the refusal is tested (credential_edges)."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Instances.cs",
+   "match": "Log.Warn($\"instances: cannot list {_dir}: {ex.Message}\");",
+   "before": 2,
+   "after": 2,
+   "kind": "line",
+   "reason": "Handler for a state directory that exists but cannot be listed (permission denied, I/O error). A test that creates the directory has the right to list it, and running as root bypasses permission checks, so the failure cannot be provoked. The handler's answer is the safe one: nothing is dead, so nothing is ever swept."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Instances.cs",
+   "match": "return false; // exited while we looked",
+   "before": 2,
+   "after": 0,
+   "kind": "line",
+   "reason": "A race: the process exits between GetProcessById and reading its StartTime. It cannot be produced on demand; the answer (not alive) is the same as for a process that was already gone, which is tested (instances_dead_ids)."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Instances.cs",
+   "match": "return true; // cannot read its start time",
+   "before": 2,
+   "after": 1,
+   "kind": "line",
+   "reason": "A process of another user whose start time cannot be read (Win32Exception). The test runs as the same user (or root, which can read every process), so it cannot be provoked. The answer is the safe one: not provably dead, so never swept."
+  }
+ ]
+}

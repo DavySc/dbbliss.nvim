@@ -41,7 +41,7 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
     private readonly SemaphoreSlim _lock = new(1, 1);
     private readonly SemaphoreSlim _slots = new(MaxPagesInFlight, MaxPagesInFlight);
     private readonly Channel<Item> _queue = Channel.CreateUnbounded<Item>(new UnboundedChannelOptions { SingleReader = true });
-    private readonly CancellationTokenSource _timerStop = new();
+    private readonly PeriodicTimer _tick = new(FlushInterval);
     private readonly Task _pump;
     private readonly Task _timer;
     private readonly SemaphoreSlim? _credit;
@@ -136,7 +136,7 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
     /// <summary>Flushes buffered rows and waits until everything is written (or stdout is gone).</summary>
     public async Task CompleteAsync()
     {
-        await _timerStop.CancelAsync();
+        _tick.Dispose();
         await _timer;
         await WithLockAsync(FlushLockedAsync);
         _queue.Writer.TryComplete();
@@ -242,24 +242,18 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
     /// <summary>Flushes a slow trickle of rows. Only when a slot is free: the timer never waits while holding the lock.</summary>
     private async Task TimerAsync()
     {
-        using var timer = new PeriodicTimer(FlushInterval);
-        try
+        // Disposing the timer ends the wait with false: no exception is needed to stop the loop.
+        while (await _tick.WaitForNextTickAsync())
         {
-            while (await timer.WaitForNextTickAsync(_timerStop.Token))
+            await WithLockAsync(() =>
             {
-                await WithLockAsync(() =>
+                if (_page.Count > 0 && _slots.Wait(0))
                 {
-                    if (_page.Count > 0 && _slots.Wait(0))
-                    {
-                        _slots.Release();
-                        return FlushLockedAsync();
-                    }
-                    return Task.CompletedTask;
-                });
-            }
-        }
-        catch (OperationCanceledException)
-        {
+                    _slots.Release();
+                    return FlushLockedAsync();
+                }
+                return Task.CompletedTask;
+            });
         }
     }
 
@@ -283,7 +277,6 @@ public sealed class ResultStreamer : IResultSink, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         await CompleteAsync();
-        _timerStop.Dispose();
         _lock.Dispose();
         _slots.Dispose();
         _credit?.Dispose();
