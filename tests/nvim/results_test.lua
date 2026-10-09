@@ -56,6 +56,7 @@ end
 
 local tests = {
   {
+    -- Verifies: HLR-UI-1
     'render_cells',
     function()
       eq({ render.cell_text(vim.NIL) }, { 'NULL', true }, 'null')
@@ -68,6 +69,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-1
     'render_fit_pads_and_truncates',
     function()
       eq(render.fit('ab', 5, false), 'ab   ', 'left aligned')
@@ -78,6 +80,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-1
     'render_widths_are_capped',
     function()
       local w = render.widths(COLS, { { 1, 'a very long name indeed' }, { 100, 'x' } }, 8)
@@ -86,6 +89,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-1
     'table_is_aligned',
     function()
       reset()
@@ -102,6 +106,7 @@ local tests = {
   },
   {
     -- Widths come from the first page; a later page with wider values must not cut them short.
+    -- Verifies: HLR-UI-1
     'later_pages_widen_the_table',
     function()
       reset()
@@ -127,6 +132,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-PAGE-1
     'pages_are_contiguous_and_fetch_continues_them',
     function()
       reset()
@@ -153,6 +159,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-PAGE-1
     'moving_to_the_end_fetches_more',
     function()
       reset()
@@ -169,6 +176,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-PAGE-1
     'query_end_drops_the_paused_hint',
     function()
       reset()
@@ -184,6 +192,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-1
     'cell_navigation_wraps_over_rows',
     function()
       reset()
@@ -206,6 +215,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-1
     'yank_cell_row_column',
     function()
       reset()
@@ -224,6 +234,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-1
     'yank_is_not_shortened',
     function()
       reset()
@@ -235,6 +246,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-1
     'several_result_sets',
     function()
       reset()
@@ -256,6 +268,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-2
     'messages_pane_shows_severity',
     function()
       reset()
@@ -266,6 +279,7 @@ local tests = {
   },
   {
     -- SQL Server error texts contain line breaks; nvim_buf_set_lines refuses them.
+    -- Verifies: HLR-UI-2
     'notes_with_line_breaks_become_lines',
     function()
       reset()
@@ -274,6 +288,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-UI-1
     'clear_starts_a_fresh_run',
     function()
       reset()

@@ -2,6 +2,7 @@
 *.user
 .vs/
 QueryLifecycle_TTrace_*
+__pycache__/
 _apalache-out/
 bin/
 cancel-report.md

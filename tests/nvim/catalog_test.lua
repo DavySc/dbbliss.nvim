@@ -83,6 +83,7 @@ end
 
 local tests = {
   {
+    -- Verifies: LLR-CAT-7
     'name_under_cursor',
     function()
       local at = names.at_cursor
@@ -105,6 +106,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-1
     'info_renders_sections',
     function()
       info.setup({ max_col_width = 60 })
@@ -143,6 +145,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-1
     'info_buffer_is_reused_and_has_keys',
     function()
       local result = { title = 'table t', kind = 'table', sections = { { title = 'Summary', columns = { 'property', 'value' }, rows = { { 'kind', 'table' } }, text = false } } }
@@ -166,6 +169,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-2
     'tree_loads_lazily_caches_and_refreshes',
     function()
       local t = fake_tree()
@@ -224,6 +228,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: LLR-CAT-8
     'tree_system_objects_toggle',
     function()
       local t = fake_tree()
@@ -238,6 +243,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-2, HLR-CAT-3
     'tree_object_actions',
     function()
       local t = fake_tree()
@@ -272,6 +278,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-5
     'tree_shows_errors_and_stays_closed',
     function()
       local t = fake_tree({ fail = 'app/public' })
@@ -294,6 +301,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: LLR-CAT-7
     'info_key_maps_only_sql_buffers',
     function()
       local dbbliss = require('dbbliss')
@@ -345,6 +353,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-PLAT-1
     'setup_refuses_an_old_neovim',
     function()
       local dbbliss = require('dbbliss')
@@ -362,6 +371,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: LLR-UI-4
     'catalog_subcommands_dispatch',
     function()
       local dbbliss = require('dbbliss')
@@ -394,6 +404,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-2
     'tree_forgets_a_disconnected_connection',
     function()
       local t = fake_tree()

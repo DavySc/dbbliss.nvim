@@ -180,6 +180,22 @@ def main():
     md += ["", "## Lua: statement (luacov)", "", "| File | Lines | Missed |", "|---|---|---|"]
     for f, v in lua.items():
         md.append(f"| `{f}` | {v['lines']}% | {len(v['missed_lines'])} |")
+    md += ["", "## Uncovered code in critical files", "",
+           "`L` statement not executed, `B` decision with a branch not taken. Each needs a test or an entry in `coverage-justifications.json`.", ""]
+    for f in policy.get("critical", []):
+        info = dotnet.get(f) or lua.get(f)
+        if not info:
+            continue
+        path = ROOT / f
+        src = path.read_text(errors="replace").splitlines() if path.exists() else []
+        items = sorted({(n, "L") for n in info.get("missed_lines", [])} | {(n, "B") for n in info.get("missed_branches", [])})
+        if not items:
+            continue
+        md += [f"### `{f.replace(SRC_PREFIX, '')}`", "", "```"]
+        for n, k in items:
+            text = src[n - 1].strip() if 0 < n <= len(src) else ""
+            md.append(f"{n:5d} {k} {text[:110]}")
+        md += ["```", ""]
     md += ["", "## Problems", ""] + ([f"- {p}" for p in problems] or ["None."])
     COV.mkdir(exist_ok=True)
     (COV / "summary.md").write_text("\n".join(md) + "\n")

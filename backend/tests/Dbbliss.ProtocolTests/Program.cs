@@ -15,36 +15,73 @@ var gate = StderrGate.Install(echo: args.Contains("--verbose"));
 
 var tests = new (string Name, string Bug, Func<Task> Run)[]
 {
+    // Verifies: HLR-TX-2
     ("query_reports_server_state", "", QueryReportsServerState),
+    // Verifies: HLR-TX-1
     ("api_begin_blocks_disconnect", "", ApiBeginBlocksDisconnect),
+    // Verifies: HLR-TX-4, HLR-LIFE-1
     ("shutdown_closes_every_session", "", ShutdownClosesEverySession),
+    // Verifies: HLR-TX-1, HLR-TX-2
     ("typed_begin_blocks_disconnect", "1: NoSilentRollback", TypedBeginBlocksDisconnect),
+    // Verifies: LLR-CONC-2, HLR-TX-2
     ("no_stale_report_after_rollback", "2: HonestTxView", NoStaleReportAfterRollback),
+    // Verifies: HLR-CANCEL-5
+    ("cancel_is_resent_and_unacknowledged_cancel_warns", "", CancelIsResentAndWarns),
+    // Verifies: HLR-CONC-1
+    ("second_operation_is_busy", "", SecondOperationIsBusy),
+    // Verifies: LLR-CAT-9
+    ("catalog_sql_has_no_dedup_keywords", "", () => { CatalogSqlRules.NoDedupKeywords(); return Task.CompletedTask; }),
+    // Verifies: LLR-CONC-2
     ("execute_right_after_query_done", "lease released too late", ExecuteRightAfterQueryDone),
+    // Verifies: LLR-CONC-2
     ("execute_right_after_transaction_call", "lease released too late", ExecuteRightAfterTransactionCall),
+    // Verifies: LLR-LIFE-3
     ("instances_dead_ids", "", InstancesDeadIds),
+    // Verifies: HLR-LIFE-2
     ("instances_prune", "", InstancesPrune),
+    // Verifies: HLR-SCRIPT-1
     ("splitter_cases", "", () => { SplitterCases.Run(); return Task.CompletedTask; }),
+    // Verifies: LLR-CLASS-1, HLR-PROD-1
     ("classifier_cases", "", () => { ClassifierCases.Run(); return Task.CompletedTask; }),
+    // Verifies: HLR-DATA-1
     ("value_conversion_cases", "", () => { ValueCases.Run(); return Task.CompletedTask; }),
+    // Verifies: HLR-EXPORT-1
     ("csv_cases", "", CsvCases.Run),
+    // Verifies: LLR-MSSQL-1
     ("sqlserver_set_option_cases", "", () => { SetOptionCases.Run(); return Task.CompletedTask; }),
+    // Verifies: HLR-CRED-1
     ("credential_validation", "", () => { CredentialTests.Validation(); return Task.CompletedTask; }),
+    // Verifies: LLR-CRED-2
     ("credential_tools", "", () => { CredentialTests.Tools(); return Task.CompletedTask; }),
+    // Verifies: LLR-CRED-3
     ("credential_blob_decoding", "", () => { CredentialTests.BlobDecoding(); return Task.CompletedTask; }),
+    // Verifies: HLR-CRED-1, LLR-CRED-3
     ("credential_manager_windows", "", () => { CredentialTests.WindowsCredentialManager(); return Task.CompletedTask; }),
+    // Verifies: HLR-CRED-1, LLR-CRED-2
     ("credential_pass_store", "", () => { CredentialTests.PassStore(); return Task.CompletedTask; }),
+    // Verifies: LLR-CAT-6
     ("catalog_name_parsing", "", () => { CatalogTests.NameParsing(); return Task.CompletedTask; }),
+    // Verifies: HLR-CAT-4
     ("catalog_independent_of_user_session", "", CatalogTests.IndependentOfTheUserSession),
+    // Verifies: HLR-CAT-4
     ("catalog_session_ends_with_connection", "", CatalogTests.CatalogSessionEndsWithTheConnection),
+    // Verifies: HLR-CAT-5
     ("catalog_errors", "", CatalogTests.Errors),
+    // Verifies: HLR-CAT-1, HLR-CAT-3
     ("catalog_shapes", "", CatalogTests.DescribeAndScriptShapes),
+    // Verifies: HLR-SCRIPT-1
     ("script_split_rpc", "", ScriptSplitRpc),
+    // Verifies: HLR-SCRIPT-3
     ("error_line_in_buffer", "", ErrorLineInBuffer),
+    // Verifies: HLR-PAGE-1
     ("paging_pauses_and_fetch_resumes", "", PagingPausesAndFetchResumes),
+    // Verifies: HLR-PAGE-2, HLR-CANCEL-4
     ("paused_query_cancels_without_loss", "", PausedQueryCancelsWithoutLoss),
+    // Verifies: HLR-PAGE-3
     ("paging_without_window_streams_all", "", PagingWithoutWindowStreamsAll),
+    // Verifies: HLR-EXPORT-1
     ("export_writes_csv", "", ExportWritesCsv),
+    // Verifies: HLR-EXPORT-1
     ("export_refuses_existing_file", "", ExportRefusesExistingFile),
 };
 
@@ -165,6 +202,53 @@ static async Task ExecuteRightAfterQueryDone()
     h.Stdout.Release();
     var response = await next;
     if (response["error"] is not null) throw new TestFailure($"execute right after query/done was refused: {response["error"]!.ToJsonString()}");
+}
+
+// A cancel the server ignores is re-sent, the user is warned after the configured time, and the
+// backend never escalates (the session stays open and usable).
+static async Task CancelIsResentAndWarns()
+{
+    await using var h = new Harness();
+    h.Backend.CancelWarnAfter = TimeSpan.FromSeconds(1);
+    var c = await h.ConnectAsync();
+    await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q", ["sql"] = "STUCK" });
+    await h.Server.StuckStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    await h.ResultAsync("cancel", new JsonObject { ["query_id"] = "q" });
+    await h.WaitForAsync(m => m["method"]?.GetValue<string>() == "query/message" && m["params"]?["severity"]?.GetValue<string>() == "warning",
+        "the warning that the cancel was not acknowledged");
+    var sent = Volatile.Read(ref h.Server.CancelRequests);
+    if (sent < 4) throw new TestFailure($"the protocol cancel was sent {sent} time(s) in the first second, expected the first plus its re-sends");
+    if (h.Server.Open.IsEmpty) throw new TestFailure("the backend closed the session instead of waiting for the server");
+    h.Server.StuckRelease.SetResult();
+    var done = await h.NotificationAsync("query/done", "q");
+    var status = done["params"]!["status"]?.GetValue<string>();
+    if (status != "cancelled") throw new TestFailure($"the stuck query ended as {status}, expected cancelled");
+    await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "after", ["sql"] = "SELECT 1" });
+    await h.NotificationAsync("query/done", "after");
+}
+
+// One operation per connection: a second execute, or a transaction call, while one runs is refused.
+static async Task SecondOperationIsBusy()
+{
+    await using var h = new Harness();
+    var c = await h.ConnectAsync();
+    await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q", ["sql"] = "STUCK" });
+    await h.Server.StuckStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+    foreach (var (method, p) in new (string, JsonObject)[]
+    {
+        ("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q2", ["sql"] = "SELECT 1" }),
+        ("transaction/begin", new JsonObject { ["connection_id"] = c }),
+        ("disconnect", new JsonObject { ["connection_id"] = c }),
+    })
+    {
+        var response = await h.CallAsync(method, p);
+        var code = response["error"]?["code"]?.GetValue<int>();
+        if (code != 1002) throw new TestFailure($"{method} while a query runs: expected error 1002 (connection_busy), got {response.ToJsonString()}");
+    }
+    h.Server.StuckRelease.SetResult();
+    await h.NotificationAsync("query/done", "q");
+    await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "after", ["sql"] = "SELECT 1" });
+    await h.NotificationAsync("query/done", "after");
 }
 
 // The same for the response to a transaction call.

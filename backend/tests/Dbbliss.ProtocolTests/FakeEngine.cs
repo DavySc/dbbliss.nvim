@@ -19,6 +19,12 @@ public sealed class FakeServer
     public ConcurrentDictionary<string, FakeSession> Open { get; } = new();
     public ConcurrentQueue<string> ClosedWithTransaction { get; } = new();
 
+    /// <summary>"STUCK": a statement that ignores cancels until <see cref="StuckRelease"/> is set, like a
+    /// server that never acknowledges. <see cref="CancelRequests"/> counts the protocol cancels it received.</summary>
+    public TaskCompletionSource StuckStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public TaskCompletionSource StuckRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    public int CancelRequests;
+
     internal FakeSession OpenSession()
     {
         var session = new FakeSession(this, "s" + Interlocked.Increment(ref _nextSession));
@@ -64,6 +70,7 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
     public Task<ExecuteSummary> ExecuteAsync(string sql, IResultSink sink, QueryControl control)
     {
         if (sql.StartsWith("ROWS ", StringComparison.Ordinal)) return StreamRowsAsync(int.Parse(sql[5..]), sink);
+        if (sql == "STUCK") return StuckAsync(control);
         lock (_gate)
         {
             switch (sql.Trim().ToUpperInvariant())
@@ -92,6 +99,16 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
             }
         }
         return Task.FromResult(new ExecuteSummary(-1));
+    }
+
+    private async Task<ExecuteSummary> StuckAsync(QueryControl control)
+    {
+        control.SetProtocolCancel(() => Interlocked.Increment(ref server.CancelRequests));
+        server.StuckStarted.TrySetResult();
+        await server.StuckRelease.Task;
+        // A driver reports the cancel once the server finally lets go of the statement.
+        if (control.CancelRequested) throw new OperationCanceledException();
+        return new ExecuteSummary(-1);
     }
 
     /// <summary>

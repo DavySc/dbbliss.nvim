@@ -1,5 +1,6 @@
 root = true
 
+# Verifies: HLR-DATA-1 (analysis: results do not depend on the machine's culture)
 [*.cs]
 # Culture-sensitive string operations behave differently on a Windows desktop with another
 # locale (Turkish i, ignorable characters). Name the comparison.

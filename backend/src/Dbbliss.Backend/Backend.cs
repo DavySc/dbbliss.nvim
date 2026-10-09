@@ -25,8 +25,8 @@ public sealed class Backend
     private static readonly TimeSpan[] CancelRefireDelays =
         [TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(150), TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(500)];
 
-    /// <summary>A cancel the server has not acknowledged after this long is reported to the user.</summary>
-    private static readonly TimeSpan CancelWarnAfter = TimeSpan.FromSeconds(10);
+    /// <summary>A cancel the server has not acknowledged after this long is reported to the user (settable for tests).</summary>
+    public TimeSpan CancelWarnAfter { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>How long shutdown waits for cancelled queries before closing their connections anyway.</summary>
     private static readonly TimeSpan ShutdownQueryWait = TimeSpan.FromSeconds(5);
@@ -213,7 +213,11 @@ public sealed class Backend
     {
         var connection = GetConnection(p);
         var rollback = p["rollback"]?.GetValue<bool>() ?? false;
-        await using (await connection.AcquireAsync())
+        // Like every other operation: a busy connection (a running or paused query) is refused, not
+        // waited for. Waiting would leave the request unanswered until the query ends and then
+        // disconnect, long after the user asked.
+        using (connection.TryAcquire()
+            ?? throw new RpcException(RpcErrors.ConnectionBusy, $"Connection {connection.Id} is running a query; cancel it or let it finish before disconnecting."))
         {
             // The server decides, not local bookkeeping: a BEGIN typed as SQL counts too. A state the
             // engine cannot ask about ("unknown") counts as open.
@@ -774,12 +778,6 @@ public sealed class Backend
         public ResultStreamer? CurrentStreamer { get; set; }
 
         public IDisposable? TryAcquire() => _busy.Wait(0) ? new Lease(_busy) : null;
-
-        public async Task<IAsyncDisposable> AcquireAsync()
-        {
-            await _busy.WaitAsync();
-            return new Lease(_busy);
-        }
 
         public void Message(string severity, string text, int? number = null, int? line = null)
         {

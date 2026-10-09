@@ -197,7 +197,14 @@ public sealed partial class Scenarios
         var before = await profile.ViewAsync(observer, catalogSession);
         Step($"catalog session exists on the server ({before.Detail})", !before.Detail.Contains("session gone", StringComparison.Ordinal));
         await c.RequestAsync("disconnect", new JsonObject { ["connection_id"] = connId, ["rollback"] = true });
+        // The server ends a logged-out session asynchronously (SQL Server shows it as dormant for a
+        // moment), so wait for it, bounded.
         var after = await profile.ViewAsync(observer, catalogSession);
+        for (var waited = 0; waited < 5000 && !after.Detail.Contains("session gone", StringComparison.Ordinal); waited += 100)
+        {
+            await Task.Delay(100);
+            after = await profile.ViewAsync(observer, catalogSession);
+        }
         Step($"catalog session ended with the connection ({after.Detail})", after.Detail.Contains("session gone", StringComparison.Ordinal));
         return Result(name, ok ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
     }

@@ -39,6 +39,8 @@ qrun() {
   fi
 }
 
+# Verifies: HLR-CANCEL-3, HLR-CANCEL-4, HLR-PAGE-1 (Proposed, ProposedLive, Current, PausedNoWake, PausedReachable)
+# Verifies: HLR-CANCEL-5 (NoRefire must fail), LLR-PG-1 (NoConnCheck must fail)
 echo "TLA+: spec/tla/QueryLifecycle.tla"
 tlc Proposed pass
 tlc ProposedLive pass
@@ -49,6 +51,7 @@ tlc NoConnCheck 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 tlc PausedNoWake 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 tlc PausedReachable 'Invariant PausedUnreachable is violated'
 
+# Verifies: HLR-TX-1, HLR-TX-2, HLR-TX-5 (NoSilentRollback, HonestTxView), HLR-CONC-3 (NoOrphanSession), LLR-CONC-2 (LeaseBeforeWrite must fail)
 echo "Quint: spec/quint/client.qnt"
 if (cd "$root/quint" && quint typecheck client.qnt >/dev/null && quint typecheck client_quit.qnt >/dev/null); then ok "typecheck"; else bad "typecheck"; fi
 out="$(cd "$root/quint" && quint verify client.qnt --backend=tlc --main=Proposed --invariant=Safe 2>&1)"

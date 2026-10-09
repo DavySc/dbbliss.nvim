@@ -81,6 +81,7 @@ local sep = pg and ';\n' or '\nGO\n'
 
 local steps = {
   {
+    -- Verifies: HLR-CRED-1
     'connect',
     function()
       local done
@@ -94,6 +95,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-SCRIPT-2, HLR-SCRIPT-3
     'script_runs_every_statement_and_stops_at_an_error',
     function()
       buffer(vim.split('select 1 as a, \'x\' as b' .. sep .. 'select * from dbbliss_no_such_table' .. sep .. 'select 3 as never', '\n'))
@@ -109,6 +111,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-SCRIPT-1
     'statement_under_cursor',
     function()
       buffer(vim.split('select 11 as first_one' .. sep .. 'select 22 as second_one', '\n'))
@@ -122,6 +125,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-PAGE-1
     'paging_pauses_and_fetch_continues',
     function()
       buffer({ series })
@@ -143,6 +147,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-PAGE-2, HLR-CANCEL-4
     'cancel_a_paused_query',
     function()
       buffer({ big })
@@ -156,6 +161,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-CANCEL-1
     'cancel_a_sleeping_query',
     function()
       buffer({ sleep })
@@ -172,6 +178,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-EXPORT-1
     'export_to_csv',
     function()
       local dir = vim.fn.tempname()
@@ -188,6 +195,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: none (fixture for the catalog steps)
     'catalog_setup',
     function()
       -- A small table of our own, in the schema the connection reaches without qualification.
@@ -199,6 +207,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-1, LLR-CAT-7
     'info_for_the_name_under_the_cursor',
     function()
       buffer({ 'select * from e2e_cat_t where id = 1' })
@@ -223,6 +232,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-2
     'schema_tree_to_an_object',
     function()
       dbbliss.tree()
@@ -281,6 +291,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-CAT-3
     'script_by_name_round_trip',
     function()
       local before = #vim.api.nvim_list_bufs()
@@ -304,6 +315,7 @@ local steps = {
     end,
   },
   {
+    -- Verifies: none (fixture removal)
     'catalog_cleanup',
     function()
       buffer({ pg and 'drop table if exists e2e_cat_t' or "if object_id('dbo.e2e_cat_t') is not null drop table dbo.e2e_cat_t" })

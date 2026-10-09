@@ -142,6 +142,7 @@ end
 
 local tests = {
   {
+    -- Verifies: none (basic lifecycle; no requirement beyond those of the cases below)
     'connect_disconnect',
     '',
     function()
@@ -155,6 +156,7 @@ local tests = {
   {
     -- The client heard nothing of the transaction (typed BEGIN still running, say); the backend
     -- refuses the plain disconnect and the user is asked, not left with an error.
+    -- Verifies: HLR-TX-1
     'disconnect_refused_asks_user',
     '',
     function()
@@ -173,6 +175,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CONC-3
     'connect_twice_while_connected',
     '3: NoOrphanSession',
     function()
@@ -184,6 +187,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CONC-3
     'connect_twice_while_connecting',
     '3: NoOrphanSession',
     function()
@@ -194,6 +198,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-SCRIPT-1
     'pick_statement_under_cursor',
     '',
     function()
@@ -208,6 +213,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-SCRIPT-2
     'run_buffer_stops_at_first_error',
     '',
     function()
@@ -224,6 +230,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-SCRIPT-1
     'run_repeats_a_go_count',
     '',
     function()
@@ -237,6 +244,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-SCRIPT-1
     'run_statement_under_cursor',
     '',
     function()
@@ -250,6 +258,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-SCRIPT-3
     'run_range_offsets_by_its_first_line',
     '',
     function()
@@ -263,6 +272,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CONC-1
     'run_refused_while_a_script_runs',
     '',
     function()
@@ -275,6 +285,7 @@ local tests = {
   },
   {
     -- query/paused shows the hint; asking for more sends fetch with the query's id and the window.
+    -- Verifies: HLR-PAGE-1
     'paused_query_fetches_more',
     '',
     function()
@@ -294,6 +305,7 @@ local tests = {
   },
   {
     -- Cancelling at the end of a window: rows already on their way are counted, not appended.
+    -- Verifies: HLR-PAGE-2
     'cancel_while_paused_counts_late_rows',
     '',
     function()
@@ -316,6 +328,7 @@ local tests = {
   },
   {
     -- Prod: statements that can change data are confirmed once, before anything runs.
+    -- Verifies: HLR-PROD-1
     'prod_confirms_writes_before_running',
     '',
     function()
@@ -340,6 +353,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-PROD-1
     'prod_does_not_ask_for_reads_or_on_other_environments',
     '',
     function()
@@ -364,6 +378,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-TX-5
     'quit_with_open_transaction_asks_and_can_be_cancelled',
     '',
     function()
@@ -391,6 +406,7 @@ local tests = {
   {
     -- The report of a typed BEGIN is not here yet, so the client's view says "none" while the
     -- server holds a transaction (spec/quint/client.qnt, QuitViewOnly).
+    -- Verifies: HLR-TX-5
     'quit_while_a_query_runs_asks',
     '',
     function()
@@ -402,6 +418,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-TX-5
     'quit_while_a_transaction_call_is_in_flight_asks',
     '',
     function()
@@ -419,6 +436,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-TX-5
     'quit_without_transaction_does_not_ask',
     '',
     function()
@@ -429,6 +447,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-TX-6
     'closing_a_buffer_with_an_open_transaction_asks',
     '',
     function()
@@ -444,6 +463,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: LLR-UI-3
     'statusline_shows_connection_env_transaction_and_running',
     '',
     function()
@@ -463,6 +483,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-CRED-1
     'password_references_are_validated',
     '',
     function()
@@ -480,6 +501,7 @@ local tests = {
     end,
   },
   {
+    -- Verifies: HLR-SCRIPT-2
     'run_not_started_ends_the_script',
     '',
     function()

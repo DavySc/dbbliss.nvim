@@ -20,44 +20,64 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
 
     public IEnumerable<(string Name, Func<Task<ScenarioResult>> Run)> All()
     {
+        // Verifies: HLR-CANCEL-1, HLR-CANCEL-2
         yield return ("sleep_cancel", () => CancelLongQuery("sleep_cancel", profile.SleepSql));
         foreach (var (name, sql) in profile.ExtraLongQueries) yield return (name, () => CancelLongQuery(name, sql));
         if (profile.HasCatalog)
         {
+            // Verifies: HLR-CAT-1, HLR-CAT-2, HLR-CAT-3, HLR-CAT-5
             yield return ("catalog_browse_describe_script", CatalogBrowseDescribeScript);
+            // Verifies: HLR-CAT-4
             yield return ("catalog_independent_of_user_session", CatalogIndependentOfUserSession);
         }
+        // Verifies: HLR-SCRIPT-3
         yield return ("error_line_in_buffer", ErrorLineInBuffer);
+        // Verifies: HLR-CANCEL-6, HLR-CANCEL-2
         yield return ("cancel_immediately", CancelImmediately);
-        if (profile.BatchThenSleepSql is not null) yield return ("batch_cancel_keeps_results", BatchCancelKeepsResults);
+        if (profile.BatchThenSleepSql is not null) yield return ("batch_cancel_keeps_results", BatchCancelKeepsResults);  // Verifies: HLR-CANCEL-3
+        // Verifies: HLR-CANCEL-2, HLR-CANCEL-3
         yield return ("streaming_cancel", StreamingCancel);
+        // Verifies: HLR-CANCEL-4, HLR-DATA-2
         yield return ("streaming_cancel_stalled_client", StreamingCancelStalledClient);
+        // Verifies: HLR-CANCEL-4, HLR-PAGE-1, HLR-PAGE-2
         yield return ("paged_cancel", PagedCancel);
+        // Verifies: HLR-EXPORT-1, HLR-CANCEL-2
         yield return ("export_cancel", ExportCancel);
+        // Verifies: HLR-CANCEL-7
         yield return ("tx_cancel", () => TransactionCancel("tx_cancel", xactAbort: false));
-        if (profile.Engine == "sqlserver") yield return ("tx_cancel_xact_abort", () => TransactionCancel("tx_cancel_xact_abort", xactAbort: true));
+        if (profile.Engine == "sqlserver") yield return ("tx_cancel_xact_abort", () => TransactionCancel("tx_cancel_xact_abort", xactAbort: true));  // Verifies: HLR-CANCEL-7
         if (profile.SupportsServerTransactionView)
         {
+            // Verifies: HLR-TX-1, HLR-TX-2
             yield return ("tx_typed_begin", TypedBegin);
+            // Verifies: HLR-TX-2
             yield return ("tx_typed_commit_after_api_begin", TypedCommitAfterApiBegin);
+            // Verifies: HLR-TX-3
             yield return ("tx_aborted_commit_refused", AbortedCommitRefused);
         }
-        if (profile is SqlServerProfile mssql) yield return ("sqlserver_set_options", () => SetOptions(mssql));
+        if (profile is SqlServerProfile mssql) yield return ("sqlserver_set_options", () => SetOptions(mssql));  // Verifies: LLR-MSSQL-1
+        // Verifies: HLR-LIFE-1, HLR-TX-4
         yield return ("backend_stdin_closed", () => BackendDeath("backend_stdin_closed", c => { c.CloseStdin(); return Task.CompletedTask; }));
+        // Verifies: HLR-LIFE-1
         yield return ("backend_sigterm", BackendSigterm);
+        // Verifies: HLR-LIFE-1, LLR-PG-1
         yield return ("backend_killed", () => BackendDeath("backend_killed", c => { c.Kill(); return Task.CompletedTask; }));
         if (profile.Engine == "postgres")
         {
             // Control experiment: shows why the backend enables client_connection_check_interval.
+            // Verifies: LLR-PG-1
             yield return ("backend_killed_no_conncheck", async () =>
             {
                 var r = await BackendDeath("backend_killed_no_conncheck",
                     c => { c.Kill(); return Task.CompletedTask; }, new JsonObject { ["pg_client_connection_check_interval_ms"] = 0 });
                 return r with { Outcome = Outcome.Info, Detail = (r.ServerStopMs is null ? "server kept running (expected): " : "server stopped: ") + r.Detail };
             });
+            // Verifies: HLR-LIFE-2
             yield return ("backend_killed_orphan_swept", OrphanSwept);
         }
+        // Verifies: HLR-LIFE-1
         yield return ("nvim_quit", () => NvimDeath("nvim_quit", kill: false));
+        // Verifies: HLR-LIFE-1
         yield return ("nvim_killed", () => NvimDeath("nvim_killed", kill: true));
     }
 
