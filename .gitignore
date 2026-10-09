@@ -5,3 +5,5 @@ obj/
 cancel-report.md
 _apalache-out/
 states/
+# TLC writes a trace spec for every counterexample it finds (the variants that must fail do)
+QueryLifecycle_TTrace_*
