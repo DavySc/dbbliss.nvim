@@ -127,13 +127,13 @@ public sealed partial class Scenarios
         return Result("pg_session_settings", ok() ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
     }
 
-    /// <summary>A failed statement inside a TRY with XACT_ABORT ON dooms the transaction (XACT_STATE -1): it is reported as aborted, refuses commit, and rolls back.</summary>
+    /// <summary>An error inside a TRY with XACT_ABORT ON (a runtime one: a constant 1/0 would fail at compile time, before the transaction starts) dooms the transaction (XACT_STATE -1): it is reported as aborted, refuses commit, and rolls back.</summary>
     private async Task<ScenarioResult> SqlServerUncommittable()
     {
         var (steps, step, ok) = Steps();
         var (c, conn, _) = await StartAsync();
         await using var _c = c;
-        await Execute(c, conn, "doom", "SET XACT_ABORT ON; BEGIN TRANSACTION; BEGIN TRY SELECT 1/0; END TRY BEGIN CATCH SELECT 1 AS caught; END CATCH");
+        await Execute(c, conn, "doom", "SET XACT_ABORT ON; BEGIN TRANSACTION; BEGIN TRY THROW 50000, 'doomed', 1; END TRY BEGIN CATCH SELECT XACT_STATE() AS state; END CATCH");
         var done = (await c.WaitDoneAsync("doom", DoneTimeoutMs))["params"]!;
         step($"after the failed statement: {done["transaction"]}", done["transaction"]?.GetValue<string>() == "aborted");
         string? message = null;
