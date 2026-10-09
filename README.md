@@ -97,6 +97,34 @@ semicolons, SQL Server at `GO` lines (`GO 5` repeats the batch), both aware of s
 quoted identifiers and, on PostgreSQL, dollar quoting. An error is shown on its line in the buffer
 (as a diagnostic) as well as in the results.
 
+### Object info, schema tree, scripting
+
+| Command | |
+|---|---|
+| `:Dbbliss info [name]` | info buffer for the name under the cursor (schema-qualified if written so), or the given name. Also `<M-F1>` in SQL buffers |
+| `:Dbbliss tree` | schema browser: database, schema, Tables / Views / Functions / Procedures |
+| `:Dbbliss script [name]` | the object's CREATE script in a new SQL buffer |
+
+The info buffer shows a summary, columns (type, nullability, default, identity, computed), indexes,
+constraints, foreign keys out and in, triggers, and for views and routines the definition. PostgreSQL
+reads `pg_catalog` (the detail of `psql \d+`); SQL Server reads `sys.*` and adds `sp_help`'s own
+sections. In it: `r` refreshes, `s` scripts the object, `q` closes.
+
+In the tree: `<CR>` expands or collapses (children load on the first expansion and are cached per
+connection), `o` the same, `i` info, `s` script, `r` refresh the node, `R` refresh everything, `S`
+show or hide system databases and schemas, `q` close. PostgreSQL lists every database but can only
+browse the one the connection is on.
+
+The catalog is read on a second session of its own, so it works while a result is paused or a
+PostgreSQL transaction is aborted. SQL Server scripts start with `USE [database]` and `GO`.
+
+```lua
+require('dbbliss').setup({
+  info = { max_col_width = 200 }, tree = { show_system = false },
+  mappings = { info = '<M-F1>' },   -- false: no key
+})
+```
+
 ### Results
 
 Results go to the `dbbliss://results` buffer as aligned tables (column widths from the first rows,

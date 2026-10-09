@@ -6,7 +6,12 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 ## Status (2026-10-09)
 
-**Phase 0 (cancel spike) and Phase 1 (core query loop, M1–M5) are complete.** Stop for the user's
+**Phase 2 (object info, schema tree, CREATE scripts) is implemented and green in CI on Linux and
+Windows, on branch `ccr-48313f28-j61iv5`; not merged into `main`: stop for the user's review.**
+Decisions to review: `docs/phase2-decisions.md` (35–42). Code: `Catalog/` (backend), `info.lua`,
+`tree.lua`, `names.lua` (Lua); scenarios in `CatalogScenarios.cs`, `tests/nvim/catalog_test.lua`.
+
+**Phase 0 (cancel spike) and Phase 1 (core query loop, M1–M5) are complete and on `main`.** Stop for the user's
 review at the end of each phase. Decisions to review: `docs/phase1-decisions.md` (22–34), including
 what was not checked. Phase 1 plan: `docs/phase1-plan.md`.
 
