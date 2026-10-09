@@ -431,7 +431,7 @@ public sealed class SqlServerCatalog : ICatalog
         var indexes = await IndexesAsync(s, t, id, ct);
         foreach (var i in indexes.Where(i => i.PrimaryKey || i.UniqueConstraint))
         {
-            var clustered = i.Type.StartsWith("clustered") ? "CLUSTERED" : "NONCLUSTERED";
+            var clustered = i.Type.StartsWith("clustered", StringComparison.Ordinal) ? "CLUSTERED" : "NONCLUSTERED";
             lines.Add($"    CONSTRAINT {ObjectNames.QuoteBracket(i.Name)} {(i.PrimaryKey ? "PRIMARY KEY" : "UNIQUE")} {clustered} ({i.Keys})");
         }
         var checks = await RunFirst(s, t.Database, "SELECT cc.name, cc.definition FROM sys.check_constraints cc WHERE cc.parent_object_id = @id ORDER BY cc.name", id, ct);
@@ -445,7 +445,7 @@ public sealed class SqlServerCatalog : ICatalog
                 script.Append($"\n-- {i.Type} index {ObjectNames.QuoteBracket(i.Name)} is not scripted\n");
                 continue;
             }
-            script.Append($"\nCREATE {(i.Unique ? "UNIQUE " : "")}{(i.Type.StartsWith("clustered") ? "CLUSTERED" : "NONCLUSTERED")} INDEX {ObjectNames.QuoteBracket(i.Name)}\n    ON {t.Qualified} ({i.Keys})");
+            script.Append($"\nCREATE {(i.Unique ? "UNIQUE " : "")}{(i.Type.StartsWith("clustered", StringComparison.Ordinal) ? "CLUSTERED" : "NONCLUSTERED")} INDEX {ObjectNames.QuoteBracket(i.Name)}\n    ON {t.Qualified} ({i.Keys})");
             if (i.Included is not null) script.Append($"\n    INCLUDE ({i.Included})");
             if (i.Filter is not null) script.Append($"\n    WHERE {i.Filter}");
             script.Append(";\nGO\n");

@@ -56,6 +56,11 @@ part without downloading `tla2tools.jar`, point `TLA_JAR` at Apalache's jar
 - A new design that involves concurrency or transactions should be checked against the models in
   `spec/`. Every variant except `Proposed` must fail; `spec/check.sh` checks that (~3 min).
 
+- `.editorconfig` makes culture-sensitive string calls (`StartsWith(string)`, `ToUpper()`, `Parse`
+  without a culture: CA1304/1309/1310/1311) build errors. Name the comparison or the culture; a
+  Windows desktop with another locale must not change a result. `ValueCases` and `CsvCases` pin the
+  value and CSV formats, including under `de-DE`.
+
 ## Commands
 
 `dotnet` lives in `~/.dotnet` (not on PATH by default): `export PATH=$HOME/.dotnet:$PATH`.

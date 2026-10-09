@@ -294,6 +294,89 @@ local tests = {
     end,
   },
   {
+    'info_key_maps_only_sql_buffers',
+    function()
+      local dbbliss = require('dbbliss')
+      local called = {}
+      local original = dbbliss.info
+      dbbliss.info = function(...)
+        called[#called + 1] = { ... }
+      end
+      local function map_for(buf, lhs)
+        for _, km in ipairs(vim.api.nvim_buf_get_keymap(buf, 'n')) do
+          if km.lhs:lower() == lhs:lower() then
+            return km
+          end
+        end
+        return {}
+      end
+      local sql = vim.api.nvim_create_buf(true, false)
+      vim.bo[sql].filetype = 'sql'
+      local lua_buf = vim.api.nvim_create_buf(true, false)
+      vim.bo[lua_buf].filetype = 'lua'
+
+      dbbliss.setup({ mappings = { info = '<M-F1>' } })
+      local m = map_for(sql, '<M-F1>')
+      expect(m.buffer == sql, 'the key is not buffer-local in an existing SQL buffer')
+      expect(next(map_for(lua_buf, '<M-F1>')) == nil, 'the key leaked into a non-SQL buffer')
+      m.callback()
+      eq(#called, 1, 'the key calls info once')
+
+      -- A buffer that becomes SQL later is mapped too.
+      local later = vim.api.nvim_create_buf(true, false)
+      vim.bo[later].filetype = 'sql'
+      expect(map_for(later, '<M-F1>').buffer == later, 'a buffer that turned SQL later has no key')
+
+      local later_lua = vim.api.nvim_create_buf(true, false)
+      vim.bo[later_lua].filetype = 'lua'
+      expect(next(map_for(later_lua, '<M-F1>')) == nil, 'the key leaked into a non-SQL buffer opened later')
+
+      -- Another key replaces the first for buffers set up after it; false turns the feature off.
+      dbbliss.setup({ mappings = { info = '<M-F2>' } })
+      local fresh = vim.api.nvim_create_buf(true, false)
+      vim.bo[fresh].filetype = 'sql'
+      expect(map_for(fresh, '<M-F2>').buffer == fresh, 'the configured key is not mapped')
+      expect(next(map_for(fresh, '<M-F1>')) == nil, 'the old key is still mapped in a new buffer')
+      dbbliss.setup({ mappings = { info = false } })
+      local off = vim.api.nvim_create_buf(true, false)
+      vim.bo[off].filetype = 'sql'
+      expect(next(map_for(off, '<M-F1>')) == nil and next(map_for(off, '<M-F2>')) == nil, 'mappings = false still mapped a key')
+      dbbliss.info = original
+    end,
+  },
+  {
+    'catalog_subcommands_dispatch',
+    function()
+      local dbbliss = require('dbbliss')
+      local saved = { dbbliss.info, dbbliss.tree, dbbliss.script_object }
+      local got = {}
+      dbbliss.info = function(name)
+        got.info = name
+      end
+      dbbliss.tree = function()
+        got.tree = true
+      end
+      dbbliss.script_object = function(name)
+        got.script = name
+      end
+      dbbliss.command({ args = 'info public.customer', range = 0 })
+      eq(got.info, 'public.customer', 'info passes the name')
+      dbbliss.command({ args = 'info "Order Line"', range = 0 })
+      eq(got.info, '"Order Line"', 'info keeps a quoted name together')
+      dbbliss.command({ args = 'info', range = 0 })
+      eq(got.info, '', 'info without a name asks for the one under the cursor')
+      dbbliss.command({ args = 'tree', range = 0 })
+      expect(got.tree, 'tree is not dispatched')
+      dbbliss.command({ args = 'script dbo.T', range = 0 })
+      eq(got.script, 'dbo.T', 'script passes the name')
+      for _, sub in ipairs({ 'info', 'tree', 'script' }) do
+        expect(vim.tbl_contains(dbbliss.complete('', 'Dbbliss '), sub), sub .. ' is not completed')
+      end
+      eq(dbbliss.complete('sc', 'Dbbliss sc'), { 'script' }, 'completion narrows')
+      dbbliss.info, dbbliss.tree, dbbliss.script_object = saved[1], saved[2], saved[3]
+    end,
+  },
+  {
     'tree_forgets_a_disconnected_connection',
     function()
       local t = fake_tree()

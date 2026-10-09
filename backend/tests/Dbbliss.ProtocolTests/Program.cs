@@ -26,6 +26,8 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("instances_prune", "", InstancesPrune),
     ("splitter_cases", "", () => { SplitterCases.Run(); return Task.CompletedTask; }),
     ("classifier_cases", "", () => { ClassifierCases.Run(); return Task.CompletedTask; }),
+    ("value_conversion_cases", "", () => { ValueCases.Run(); return Task.CompletedTask; }),
+    ("csv_cases", "", CsvCases.Run),
     ("sqlserver_set_option_cases", "", () => { SetOptionCases.Run(); return Task.CompletedTask; }),
     ("credential_validation", "", () => { CredentialTests.Validation(); return Task.CompletedTask; }),
     ("credential_tools", "", () => { CredentialTests.Tools(); return Task.CompletedTask; }),
