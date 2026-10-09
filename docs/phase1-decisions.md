@@ -110,8 +110,10 @@ a Kerberos ticket from `kinit`). No new dependencies.
   in `CLAUDE.md` (model it first) was not followed: TLC could not be downloaded where this was
   written. **Run `spec/check.sh` on your machine**, and add a `ClientFetch` action if you want it
   modelled.
-- **`Proposed` in `client.qnt` was checked by simulation only** (20 000 traces), not exhaustively
-  with TLC as before; adding `UQuit` grows the state space past the earlier 6.2M states.
+- **`Proposed` in `client.qnt` with the quit action** verifies exhaustively with TLC through Apalache
+  (about 2.5 minutes, no violation); the two quit variants live in `client_quit.qnt` and are
+  checked by simulation, because Apalache fails on them without a message (see that file).
+  `spec/check.sh` now runs in CI as its own job.
 - **`libsecret` is tested with a fake runner only** (a D-Bus secret service is not in CI). `pass`
   and Credential Manager are tested for real.
 - Windows: SQL Server Express on the GitHub runner is sometimes unreachable (seen once in M1);

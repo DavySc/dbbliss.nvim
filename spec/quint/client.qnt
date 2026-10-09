@@ -124,6 +124,15 @@ module client {
 
   pure def hasConn(o: LuaConnOpt): bool = connId(o) >= 0
 
+  // A transaction call is in flight (its report has not reached Lua).
+  pure def isTxCall(c: Cb): bool = match c {
+    | CbConnect => false
+    | CbExecute(_) => false
+    | CbCancel => false
+    | CbTx(_) => true
+    | CbDisconnect(_) => false
+  }
+
   pure def connTx(o: LuaConnOpt): str = match o {
     | NoConn => ""
     | Conn(c) => c.tx
@@ -313,7 +322,7 @@ module client {
   action UQuit = {
     val viewOpen = hasConn(lconn) and connTx(lconn) != "none"
     val inflight = lqueries.keys().size() > 0 or
-      lpending.keys().exists(r => match lpending.get(r) { | CbTx(_) => true | _ => false })
+      lpending.keys().exists(r => isTxCall(lpending.get(r)))
     val asked = AskOnQuit and (viewOpen or (AskWhileRunning and inflight))
     val serverOpen = srv.keys().exists(c => srv.get(c) != TNone)
     all {
@@ -644,13 +653,4 @@ module LeaseBeforeWrite {
 
 module LuaByName {
   import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = false, AskOnQuit = true, AskWhileRunning = true, MaxActions = 6, MaxConnects = 2).*
-}
-
-// Quitting (M4). Both prompts are needed.
-module QuitNoPrompt {
-  import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = true, AskOnQuit = false, AskWhileRunning = false, MaxActions = 6, MaxConnects = 2).*
-}
-
-module QuitViewOnly {
-  import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = true, AskOnQuit = true, AskWhileRunning = false, MaxActions = 6, MaxConnects = 2).*
 }

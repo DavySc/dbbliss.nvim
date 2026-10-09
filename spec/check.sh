@@ -27,10 +27,10 @@ tlc() {
   fi
 }
 
-# qrun <module> <invariant> <pass | violation>: random simulation
+# qrun <module> <invariant> <pass | violation> [file]: random simulation (file defaults to client.qnt)
 qrun() {
   local out
-  out="$(cd "$root/quint" && quint run client.qnt --main="$1" --invariant="$2" \
+  out="$(cd "$root/quint" && quint run "${4:-client.qnt}" --main="$1" --invariant="$2" \
     --max-steps=30 --max-samples=20000 --seed=1 --verbosity=1 2>&1)"
   if [[ $3 == pass ]]; then
     grep -q 'No violation' <<<"$out" && ok "quint $1: $2 holds (simulation)" || { bad "quint $1: $2 should hold"; echo "$out" | tail -20; }
@@ -48,7 +48,7 @@ tlc NoRefire 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 tlc NoConnCheck 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 
 echo "Quint: spec/quint/client.qnt"
-if (cd "$root/quint" && quint typecheck client.qnt >/dev/null); then ok "typecheck"; else bad "typecheck"; fi
+if (cd "$root/quint" && quint typecheck client.qnt >/dev/null && quint typecheck client_quit.qnt >/dev/null); then ok "typecheck"; else bad "typecheck"; fi
 out="$(cd "$root/quint" && quint verify client.qnt --backend=tlc --main=Proposed --invariant=Safe 2>&1)"
 if grep -q 'No violation found' <<<"$out"; then
   ok "quint Proposed: Safe holds (TLC, exhaustive within the bounds)"
@@ -66,8 +66,8 @@ qrun NoServerTruth NoSilentRollback violation
 qrun NoServerTruth HonestTxView violation
 qrun LeaseBeforeWrite HonestTxView violation
 qrun LuaByName NoOrphanSession violation
-qrun QuitNoPrompt NoSilentRollback violation
-qrun QuitViewOnly NoSilentRollback violation
+qrun QuitNoPrompt NoSilentRollback violation client_quit.qnt
+qrun QuitViewOnly NoSilentRollback violation client_quit.qnt
 
 echo
 if [[ $failures == 0 ]]; then echo "all checks passed"; else echo "$failures check(s) failed"; exit 1; fi

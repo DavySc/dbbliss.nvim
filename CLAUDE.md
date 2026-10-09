@@ -30,8 +30,8 @@ references in `Credentials.cs`.
 - Formal models in `spec/` (TLA+ query lifecycle, Quint client/transactions) found four bugs after
   the spike. All are fixed and covered by tests (`docs/phase0-results.md`, bugs 5–8; `spec/README.md`).
 
-Open from Phase 1: the paging protocol is not in `spec/tla/QueryLifecycle.tla`, and `Proposed` in
-`spec/quint/client.qnt` was only simulated after adding `UQuit` (run `spec/check.sh`).
+Open from Phase 1: the paging protocol is not in `spec/tla/QueryLifecycle.tla`. `spec/check.sh` runs
+in CI (job `spec-check`); the quit variants are in `spec/quint/client_quit.qnt`.
 
 ## Rules that are easy to miss
 
