@@ -12,7 +12,7 @@ local TRANSACTION_OPEN = 1003
 ---@class dbbliss.ConnectionConfig
 ---@field engine 'postgres'|'sqlserver'|'db2i'
 ---@field connection_string string  without the password
----@field password? { env: string }  a reference, never a literal
+---@field password? { env: string }|{ credman: string }|{ pass: string }|{ libsecret: table<string,string> }  where to find the password, never the password; leave out for integrated auth
 ---@field env? 'dev'|'test'|'prod'
 ---@field options? table
 
@@ -90,8 +90,23 @@ end
 function M.setup(opts)
   state.config = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
   for name, c in pairs(state.config.connections) do
-    if type(c.password) == 'string' then
-      error(('dbbliss: connection %s: password must be a reference like { env = "NAME" }, not a literal'):format(name), 0)
+    if c.password ~= nil then
+      if type(c.password) ~= 'table' then
+        error(
+          ('dbbliss: connection %s: password must be a reference like { env = "NAME" }, { credman = "target" }, { pass = "path" } or { libsecret = { service = "x" } }, not a literal'):format(name),
+          0
+        )
+      end
+      local keys = vim.tbl_keys(c.password)
+      if #keys ~= 1 or not vim.tbl_contains({ 'env', 'credman', 'pass', 'libsecret' }, keys[1]) then
+        error(
+          ('dbbliss: connection %s: password must name exactly one of env, credman, pass, libsecret (got %s)'):format(
+            name,
+            #keys == 0 and 'none' or table.concat(keys, ', ')
+          ),
+          0
+        )
+      end
     end
     if not c.engine or not c.connection_string then
       error(('dbbliss: connection %s needs engine and connection_string'):format(name), 0)

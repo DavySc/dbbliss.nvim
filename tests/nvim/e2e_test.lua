@@ -1,7 +1,8 @@
 -- End to end through the real plugin and the published backend, against a real database:
 -- scopes, paging, fetch-more, cancel, export. Needs the backend built (scripts/build.sh) and
 --
---   DBBLISS_E2E_ENGINE=postgres|sqlserver  DBBLISS_E2E_CS=<connection string>  [DBBLISS_E2E_PW_ENV=<env var holding the password>]
+--   DBBLISS_E2E_ENGINE=postgres|sqlserver  DBBLISS_E2E_CS=<connection string>
+--   and, for the password, one of DBBLISS_E2E_PW_ENV=<env var> | DBBLISS_E2E_CREDMAN=<credential target> | DBBLISS_E2E_PASS=<pass entry>
 --
 --   nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/e2e_test.lua
 --
@@ -22,7 +23,11 @@ dbbliss.setup({
     db = {
       engine = engine,
       connection_string = assert(env.DBBLISS_E2E_CS, 'DBBLISS_E2E_CS not set'),
-      password = env.DBBLISS_E2E_PW_ENV and { env = env.DBBLISS_E2E_PW_ENV } or nil,
+      -- One of: an environment variable, Windows Credential Manager, or the pass store.
+      password = (env.DBBLISS_E2E_PW_ENV and { env = env.DBBLISS_E2E_PW_ENV })
+        or (env.DBBLISS_E2E_CREDMAN and { credman = env.DBBLISS_E2E_CREDMAN })
+        or (env.DBBLISS_E2E_PASS and { pass = env.DBBLISS_E2E_PASS })
+        or nil,
     },
   },
 })

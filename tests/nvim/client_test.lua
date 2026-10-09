@@ -463,6 +463,23 @@ local tests = {
     end,
   },
   {
+    'password_references_are_validated',
+    '',
+    function()
+      local function setup_with(password)
+        return pcall(dbbliss.setup, { connections = { x = { engine = 'postgres', connection_string = 'Host=x', password = password } } })
+      end
+      expect(not setup_with('literal'), 'a literal password was accepted')
+      expect(not setup_with({}), 'an empty reference was accepted')
+      expect(not setup_with({ env = 'A', pass = 'b' }), 'two references were accepted')
+      expect(not setup_with({ vault = 'x' }), 'an unknown reference was accepted')
+      for _, ok in ipairs({ { env = 'A' }, { credman = 'target' }, { pass = 'a/b' }, { libsecret = { service = 'x' } } }) do
+        expect(setup_with(ok), 'rejected ' .. vim.inspect(ok))
+      end
+      expect(setup_with(nil), 'integrated auth (no password) was rejected')
+    end,
+  },
+  {
     'run_not_started_ends_the_script',
     '',
     function()

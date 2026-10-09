@@ -63,6 +63,28 @@ jobs:
         shell: pwsh
         run: scripts/build.ps1 -Rid win-x64
 
+      - name: Credential stores (Linux: a pass store with a throwaway key)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get install -y pass gnupg
+          export GNUPGHOME="$RUNNER_TEMP/gnupg" PASSWORD_STORE_DIR="$RUNNER_TEMP/pass-store"
+          mkdir -m 700 "$GNUPGHOME"
+          gpg --batch --passphrase "" --quick-gen-key dbbliss-ci@example.invalid default default never
+          pass init dbbliss-ci@example.invalid
+          printf '%s\n' "$DBBLISS_TEST_PG_PASSWORD" | pass insert -m -f dbbliss/pg
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          echo "PASSWORD_STORE_DIR=$PASSWORD_STORE_DIR" >> "$GITHUB_ENV"
+          echo "DBBLISS_TEST_PASS=1" >> "$GITHUB_ENV"
+          echo "DBBLISS_E2E_PASS=dbbliss/pg" >> "$GITHUB_ENV"
+
+      - name: Credential stores (Windows: Credential Manager)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cmdkey "/generic:dbbliss-e2e" "/user:postgres" "/pass:root"
+          echo "DBBLISS_E2E_CREDMAN=dbbliss-e2e" >> "$GITHUB_ENV"
+
       - name: Protocol tests (fake engine)
         shell: bash
         run: dotnet run --project backend/tests/Dbbliss.ProtocolTests
@@ -76,9 +98,10 @@ jobs:
       - name: End-to-end through the plugin (both engines)
         shell: bash
         run: |
-          env DBBLISS_E2E_ENGINE=postgres DBBLISS_E2E_CS="$DBBLISS_TEST_PG" DBBLISS_E2E_PW_ENV=DBBLISS_TEST_PG_PASSWORD \
+          # PostgreSQL: the password comes from the credential store of the platform (pass / Credential Manager).
+          env DBBLISS_E2E_ENGINE=postgres DBBLISS_E2E_CS="$DBBLISS_TEST_PG" \
             nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/e2e_test.lua
-          env DBBLISS_E2E_ENGINE=sqlserver DBBLISS_E2E_CS="$DBBLISS_TEST_MSSQL" ${DBBLISS_TEST_MSSQL_PASSWORD:+DBBLISS_E2E_PW_ENV=DBBLISS_TEST_MSSQL_PASSWORD} \
+          env -u DBBLISS_E2E_PASS -u DBBLISS_E2E_CREDMAN DBBLISS_E2E_ENGINE=sqlserver DBBLISS_E2E_CS="$DBBLISS_TEST_MSSQL" ${DBBLISS_TEST_MSSQL_PASSWORD:+DBBLISS_E2E_PW_ENV=DBBLISS_TEST_MSSQL_PASSWORD} \
             nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/e2e_test.lua
 
       - name: Phase 0 cancel suite
