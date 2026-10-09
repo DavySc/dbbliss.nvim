@@ -117,6 +117,22 @@ jobs:
   # The formal models in spec/ (TLA+ query lifecycle, Quint client/transactions): the proposed design
   # must hold and every other variant must fail the documented way. Linux only; the models do not
   # depend on the OS. A separate job so a slow or red model check does not hide the test results.
+  # The README says Neovim 0.10+: the suites that need no database also run on exactly that version.
+  lua-min-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: v0.10.0
+      - name: Lua suites on the minimum Neovim
+        run: |
+          nvim --version | head -1
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/results_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/catalog_test.lua
+
   spec-check:
     runs-on: ubuntu-latest
     timeout-minutes: 60

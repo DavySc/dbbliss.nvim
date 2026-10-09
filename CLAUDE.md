@@ -61,6 +61,10 @@ part without downloading `tla2tools.jar`, point `TLA_JAR` at Apalache's jar
   Windows desktop with another locale must not change a result. `ValueCases` and `CsvCases` pin the
   value and CSV formats, including under `de-DE`.
 
+- The plugin needs Neovim 0.10+; `setup()` refuses older ones, and the CI job `lua-min-version`
+  runs the database-free Lua suites on exactly v0.10.0. The Neovim in apt is 0.9.5: for local runs
+  use the release tarball (`nvim-linux64.tar.gz` from github.com/neovim/neovim, v0.10.0).
+
 ## Commands
 
 `dotnet` lives in `~/.dotnet` (not on PATH by default): `export PATH=$HOME/.dotnet:$PATH`.

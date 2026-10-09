@@ -97,6 +97,10 @@ end
 
 ---@param opts dbbliss.Config?
 function M.setup(opts)
+  if vim.fn.has('nvim-0.10') == 0 then
+    local v = vim.version()
+    error(('dbbliss: Neovim 0.10 or newer is required (this is %d.%d.%d)'):format(v.major, v.minor, v.patch), 0)
+  end
   state.config = vim.tbl_deep_extend('force', vim.deepcopy(defaults), opts or {})
   for name, c in pairs(state.config.connections) do
     if c.password ~= nil then

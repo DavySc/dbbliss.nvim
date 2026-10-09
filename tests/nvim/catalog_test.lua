@@ -345,6 +345,23 @@ local tests = {
     end,
   },
   {
+    'setup_refuses_an_old_neovim',
+    function()
+      local dbbliss = require('dbbliss')
+      local has = vim.fn.has
+      vim.fn.has = function(feature)
+        if feature == 'nvim-0.10' then
+          return 0
+        end
+        return has(feature)
+      end
+      local ok, err = pcall(dbbliss.setup, {})
+      vim.fn.has = has
+      expect(not ok, 'setup accepted Neovim 0.9')
+      expect(tostring(err):find('0.10', 1, true), 'the error does not name the version: ' .. tostring(err))
+    end,
+  },
+  {
     'catalog_subcommands_dispatch',
     function()
       local dbbliss = require('dbbliss')
