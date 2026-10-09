@@ -88,6 +88,21 @@ public static class UnitCases
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException("closed (simulated)");
     }
 
+    // Parameters are bound as given; a null becomes DBNull (neither driver takes a bare null).
+    public static void ParameterBinding()
+    {
+        var values = new Dictionary<string, object?> { ["a"] = 1, ["b"] = null, ["c"] = "text" };
+        foreach (System.Data.Common.DbCommand cmd in new System.Data.Common.DbCommand[] { new Npgsql.NpgsqlCommand("select 1"), new Microsoft.Data.SqlClient.SqlCommand("select 1") })
+        {
+            AdoQuery.AddParameters(cmd, null);
+            Check(cmd.Parameters.Count == 0, cmd.GetType().Name + ": parameters were added for none");
+            AdoQuery.AddParameters(cmd, values);
+            Check(cmd.Parameters.Count == 3, cmd.GetType().Name + ": parameter count");
+            Check(cmd.Parameters[0].Value is 1 && cmd.Parameters[1].Value is DBNull && cmd.Parameters[2].Value is "text", cmd.GetType().Name + ": values");
+            Check(cmd.Parameters[1].ParameterName.TrimStart('@') == "b", cmd.GetType().Name + ": names");
+        }
+    }
+
     public static void IdentifierQuoting()
     {
         Check(ObjectNames.QuoteIdent("plain") == "\"plain\"", "plain identifier");

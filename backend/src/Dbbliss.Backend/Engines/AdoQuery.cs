@@ -3,8 +3,25 @@ using System.Data.Common;
 namespace Dbbliss.Backend.Engines;
 
 /// <summary>Reads every result set of a command completely (catalog queries; the user's statements stream instead).</summary>
-internal static class AdoQuery
+public static class AdoQuery
 {
+    /// <summary>
+    /// Binds named values. A null becomes DBNull (both drivers refuse a bare null). The name is used as
+    /// given, with or without the @: both drivers accept either.
+    /// </summary>
+    public static void AddParameters(DbCommand cmd, IReadOnlyDictionary<string, object?>? parameters)
+    {
+        if (parameters is null) return;
+        foreach (var (name, value) in parameters)
+        {
+            var parameter = cmd.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value ?? DBNull.Value;
+            cmd.Parameters.Add(parameter);
+        }
+    }
+
+
     public static async Task<IReadOnlyList<QueryTable>> ReadAllAsync(DbCommand cmd, CancellationToken ct)
     {
         var tables = new List<QueryTable>();

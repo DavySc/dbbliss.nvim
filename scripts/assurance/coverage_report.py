@@ -132,7 +132,10 @@ def justification_index(problems):
             problems.append(f"justification {label} has no reason")
             continue
         at = hits[0]
-        resolved.append((j["file"], at - j.get("before", 0), at + j.get("after", 0), j["kind"], j["reason"], label))
+        if j.get("category") not in ("platform", "unreachable", "defensive"):
+            problems.append(f"justification {label} needs a category: platform, unreachable or defensive")
+            continue
+        resolved.append((j["file"], at - j.get("before", 0), at + j.get("after", 0), j["kind"], j["reason"], label, j["category"]))
     return resolved
 
 
@@ -213,6 +216,13 @@ def main():
             text = src[n - 1].strip() if 0 < n <= len(src) else ""
             md.append(f"{n:5d} {k} {text[:110]}")
         md += ["```", ""]
+    by_category = {}
+    for j in js:
+        by_category[j[6]] = by_category.get(j[6], 0) + 1
+    md += ["", "## Justifications in use", "",
+           "`platform`: runs on the other OS in CI, not measured. `unreachable`: the code cannot take that branch. "
+           "`defensive`: a handler for a failure that cannot be provoked; it is not tested. "
+           + ", ".join(f"{n} {c}" for c, n in sorted(by_category.items()))]
     md += ["", "## Problems", ""] + ([f"- {p}" for p in problems] or ["None."])
     COV.mkdir(exist_ok=True)
     (COV / "summary.md").write_text("\n".join(md) + "\n")

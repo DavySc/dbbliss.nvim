@@ -35,26 +35,4 @@ internal static class AdoStreaming
         }
         while (await reader.NextResultAsync());
     }
-
-    /// <summary>Synchronous variant for drivers whose async API is not truly async (System.Data.Odbc).</summary>
-    public static void Stream(DbDataReader reader, IResultSink sink)
-    {
-        var index = 0;
-        do
-        {
-            if (reader.FieldCount > 0)
-            {
-                sink.ResultSetAsync(index, ValueConverter.Columns(reader)).AsTask().GetAwaiter().GetResult();
-                long rows = 0;
-                while (reader.Read())
-                {
-                    sink.RowAsync(index, ValueConverter.ReadRow(reader)).AsTask().GetAwaiter().GetResult();
-                    rows++;
-                }
-                sink.ResultSetDoneAsync(index, rows).AsTask().GetAwaiter().GetResult();
-                index++;
-            }
-        }
-        while (reader.NextResult());
-    }
 }

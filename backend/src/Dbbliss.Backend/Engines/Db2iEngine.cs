@@ -84,7 +84,7 @@ public sealed class Db2iEngine : IEngine
                 {
                     control.Token.ThrowIfCancellationRequested();
                     using var reader = cmd.ExecuteReader();
-                    AdoStreaming.Stream(reader, sink);
+                    Db2iStreaming.Stream(reader, sink);
                     reader.Close();
                     return new ExecuteSummary(reader.RecordsAffected);
                 }
@@ -127,5 +127,30 @@ public sealed class Db2iEngine : IEngine
             conn.Dispose();
             return ValueTask.CompletedTask;
         }
+    }
+}
+
+/// <summary>Synchronous result streaming for System.Data.Odbc, whose async API is not truly async. DB2 for i only (deferred, decision 16).</summary>
+internal static class Db2iStreaming
+{
+    public static void Stream(System.Data.Common.DbDataReader reader, IResultSink sink)
+    {
+        var index = 0;
+        do
+        {
+            if (reader.FieldCount > 0)
+            {
+                sink.ResultSetAsync(index, ValueConverter.Columns(reader)).AsTask().GetAwaiter().GetResult();
+                long rows = 0;
+                while (reader.Read())
+                {
+                    sink.RowAsync(index, ValueConverter.ReadRow(reader)).AsTask().GetAwaiter().GetResult();
+                    rows++;
+                }
+                sink.ResultSetDoneAsync(index, rows).AsTask().GetAwaiter().GetResult();
+                index++;
+            }
+        }
+        while (reader.NextResult());
     }
 }

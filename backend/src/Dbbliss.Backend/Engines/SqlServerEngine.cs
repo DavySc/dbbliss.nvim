@@ -35,7 +35,7 @@ public sealed partial class SqlServerEngine : IEngine
     /// The SET batch for a new session: the defaults, then the user's entries (same name replaces the
     /// default). Names and values are checked against a narrow pattern because they are pasted into SQL.
     /// </summary>
-    public static string? BuildSetBatch(JsonObject? options)
+    public static string BuildSetBatch(JsonObject? options)
     {
         var set = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in DefaultSetOptions) set[name] = value;
@@ -64,7 +64,7 @@ public sealed partial class SqlServerEngine : IEngine
                 set[name] = value;
             }
         }
-        return set.Count == 0 ? null : string.Join("; ", set.Select(kv => $"SET {kv.Key.ToUpperInvariant()} {kv.Value}"));
+        return string.Join("; ", set.Select(kv => $"SET {kv.Key.ToUpperInvariant()} {kv.Value}"));
     }
 
     public async Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct)
@@ -92,12 +92,9 @@ public sealed partial class SqlServerEngine : IEngine
         try
         {
             await conn.OpenAsync(ct);
-            if (setBatch is not null)
-            {
-                await using var cmd = conn.CreateCommand();
-                cmd.CommandText = setBatch;
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = setBatch;
+            await cmd.ExecuteNonQueryAsync(ct);
         }
         catch
         {
@@ -111,11 +108,11 @@ public sealed partial class SqlServerEngine : IEngine
     {
         if (ex is SqlException sql)
         {
-            var first = sql.Errors.Count > 0 ? sql.Errors[0] : null;
             return new ErrorInfo(
                 sql.Message,
                 Code: sql.Number.ToString(CultureInfo.InvariantCulture),
-                Line: first?.LineNumber,
+                // 0 for an error that is not in a statement (a failed login, a refused connection).
+                Line: sql.LineNumber > 0 ? sql.LineNumber : null,
                 Severity: sql.Class.ToString(CultureInfo.InvariantCulture));
         }
         return new ErrorInfo(ex.Message);
@@ -159,10 +156,7 @@ public sealed partial class SqlServerEngine : IEngine
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = sql;
             cmd.CommandTimeout = 30;
-            if (parameters is not null)
-            {
-                foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
-            }
+            AdoQuery.AddParameters(cmd, parameters);
             return await AdoQuery.ReadAllAsync(cmd, ct);
         }
 

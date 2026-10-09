@@ -56,6 +56,19 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
             yield return ("tx_aborted_commit_refused", AbortedCommitRefused);
         }
         if (profile is SqlServerProfile mssql) yield return ("sqlserver_set_options", () => SetOptions(mssql));  // Verifies: LLR-MSSQL-1
+        if (profile.UnreachableConnectionString is not null)
+        {
+            // Verifies: LLR-WIRE-2
+            yield return ("connect_failure", ConnectFailure);
+            // Verifies: LLR-SESS-1
+            yield return ("application_name", ApplicationName);
+            // Verifies: HLR-TX-3
+            yield return ("tx_misuse", TransactionMisuse);
+        }
+        // Verifies: LLR-PG-1
+        if (profile.Engine == "postgres") yield return ("pg_session_settings", PgSessionSettings);
+        // Verifies: HLR-TX-3, HLR-TX-2
+        if (profile.Engine == "sqlserver") yield return ("sqlserver_uncommittable_transaction", SqlServerUncommittable);
         // Verifies: HLR-LIFE-1, HLR-TX-4
         yield return ("backend_stdin_closed", () => BackendDeath("backend_stdin_closed", c => { c.CloseStdin(); return Task.CompletedTask; }));
         // Verifies: HLR-LIFE-1
@@ -84,7 +97,7 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
     private ScenarioResult Result(string scenario, Outcome o, string detail, long? stopMs = null) =>
         new(profile.Engine, scenario, o, detail, stopMs);
 
-    private async Task<(BackendClient Client, string ConnectionId, string Session)> StartAsync(JsonObject? options = null, string? stateDir = null)
+    private async Task<(BackendClient Client, string ConnectionId, string Session)> StartAsync(JsonObject? options = null, string? stateDir = null, string? connectionString = null)
     {
         var env = BackendEnv;
         if (stateDir is not null) env["DBBLISS_STATE_DIR"] = stateDir;
@@ -93,7 +106,7 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
         var conn = await client.RequestAsync("connect", new JsonObject
         {
             ["engine"] = profile.Engine,
-            ["connection_string"] = profile.ConnectionString,
+            ["connection_string"] = connectionString ?? profile.ConnectionString,
             // No password env set: integrated auth (e.g. SQL Server Express on the Windows CI runner).
             ["password"] = string.IsNullOrEmpty(Environment.GetEnvironmentVariable(profile.PasswordEnv)) ? null : new JsonObject { ["env"] = profile.PasswordEnv },
             ["options"] = options,

@@ -185,7 +185,13 @@ The plugin shall refuse to start on a Neovim older than 0.10. Source: README.
 
 ### LLR-PG-1
 New PostgreSQL sessions shall get `client_connection_check_interval = 2000` (configurable, 0 = off)
-and a warning shall be given when the server cannot enable it. Source: decision 3.
+a negative value shall be refused at connect, and a warning shall be given when the server cannot
+enable it. Source: decision 3; problem report PR-022.
+
+### LLR-SESS-1
+A new session shall name itself `dbbliss.nvim` (PostgreSQL: `dbbliss.nvim <instance id>`, which the
+orphan sweep relies on) unless the user's connection string already sets an application name, which
+shall be kept. Source: decision 21.
 
 ### LLR-MSSQL-1
 New SQL Server sessions shall apply `SET ARITHABORT ON` and the user's `mssql_set_options`; a name or

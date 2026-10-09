@@ -50,6 +50,12 @@ public abstract class EngineProfile
     /// <summary>A name as the user would type it to reach a fixture object (SQL Server: through the database).</summary>
     public virtual string Qualify(string schemaAndName) => schemaAndName;
 
+    /// <summary>A connection string that reaches nothing, so connecting fails quickly (port 1 on this machine).</summary>
+    public virtual string? UnreachableConnectionString => null;
+
+    /// <summary>A statement that returns the session's application name as its first value.</summary>
+    public virtual string? ApplicationNameSql => null;
+
     /// <summary>Statements that drop the scripted fixture objects, dependants first.</summary>
     public virtual IReadOnlyList<string> DropScriptedObjectsSql => [];
 
@@ -97,6 +103,8 @@ public abstract class EngineProfile
 
 public sealed class PostgresProfile : EngineProfile
 {
+    public override string? UnreachableConnectionString => "Host=127.0.0.1;Port=1;Username=nobody;Database=none;Timeout=3";
+    public override string? ApplicationNameSql => "SHOW application_name";
     public override string Engine => "postgres";
     public override string SleepSql => "SELECT pg_sleep(60)";
     public override string? BatchThenSleepSql => "SELECT 1 AS a; SELECT pg_sleep(60)";
@@ -189,6 +197,8 @@ public sealed class PostgresProfile : EngineProfile
 
 public sealed class SqlServerProfile : EngineProfile
 {
+    public override string? UnreachableConnectionString => "Server=127.0.0.1,1;User Id=nobody;TrustServerCertificate=true;Connect Timeout=3";
+    public override string? ApplicationNameSql => "SELECT APP_NAME()";
     public override string Engine => "sqlserver";
     public override string TypedBeginSql => "BEGIN TRANSACTION";
     public override string TypedCommitSql => "COMMIT TRANSACTION";

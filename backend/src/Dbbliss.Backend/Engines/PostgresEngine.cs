@@ -6,8 +6,8 @@ namespace Dbbliss.Backend.Engines;
 
 /// <summary>PostgreSQL via Npgsql. Cancel = NpgsqlCommand.Cancel() → CancelRequest on a separate connection.</summary>
 /// <param name="instances">This backend's registration. Sessions are tagged with its id, and every
-/// connect ends sessions left by dead instances (decision 19). Null: no tag, no sweep.</param>
-public sealed class PostgresEngine(Instances? instances = null) : IEngine
+/// connect ends sessions left by dead instances (decision 19).</param>
+public sealed class PostgresEngine(Instances instances) : IEngine
 {
     /// <summary><c>application_name</c> prefix; the instance id follows (pgAdmin tags its sessions the same way).</summary>
     public const string AppNamePrefix = "dbbliss.nvim ";
@@ -31,7 +31,7 @@ public sealed class PostgresEngine(Instances? instances = null) : IEngine
         };
         if (spec.Password is not null) builder.Password = spec.Password;
         // A user-supplied application_name is kept; such sessions cannot be swept.
-        if (string.IsNullOrEmpty(builder.ApplicationName)) builder.ApplicationName = instances is null ? "dbbliss.nvim" : AppNamePrefix + instances.Id;
+        if (string.IsNullOrEmpty(builder.ApplicationName)) builder.ApplicationName = AppNamePrefix + instances.Id;
 
         var conn = new NpgsqlConnection(builder.ConnectionString);
         conn.Notice += (_, e) => messages.Message(e.Notice.Severity.ToLowerInvariant(), e.Notice.MessageText);
@@ -39,11 +39,15 @@ public sealed class PostgresEngine(Instances? instances = null) : IEngine
         {
             await conn.OpenAsync(ct);
             var checkMs = spec.Options?["pg_client_connection_check_interval_ms"]?.GetValue<int>() ?? DefaultConnectionCheckMs;
+            if (checkMs < 0)
+            {
+                throw new ArgumentException("options.pg_client_connection_check_interval_ms must be 0 (off) or a number of milliseconds above 0.");
+            }
             if (checkMs > 0)
             {
                 await ApplyConnectionCheckAsync(conn, checkMs, messages, ct);
             }
-            if (instances is not null) await EndOrphansAsync(conn, instances, messages, ct);
+            await EndOrphansAsync(conn, instances, messages, ct);
         }
         catch
         {
@@ -172,10 +176,7 @@ public sealed class PostgresEngine(Instances? instances = null) : IEngine
         public async Task<IReadOnlyList<QueryTable>> QueryAsync(string sql, IReadOnlyDictionary<string, object?>? parameters, CancellationToken ct)
         {
             await using var cmd = new NpgsqlCommand(sql, conn) { CommandTimeout = 30 };
-            if (parameters is not null)
-            {
-                foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
-            }
+            AdoQuery.AddParameters(cmd, parameters);
             return await AdoQuery.ReadAllAsync(cmd, ct);
         }
 
