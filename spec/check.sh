@@ -12,7 +12,7 @@ failures=0
 ok() { printf '  ok    %s\n' "$1"; }
 bad() { printf '  FAIL  %s\n' "$1"; failures=$((failures + 1)); }
 
-# tlc <cfg> <expected: pass | text that must appear in the output>
+# tlc <cfg> <expected: pass | extended regex that must match the output>
 tlc() {
   local out
   out="$(cd "$root/tla" && java -XX:+UseParallelGC -cp "$jar" tlc2.TLC -workers auto \
@@ -21,7 +21,9 @@ tlc() {
   if [[ $2 == pass ]]; then
     [[ $code == 0 ]] && ok "tla $1: no error" || { bad "tla $1: expected no error"; echo "$out" | tail -20; }
   else
-    grep -q "$2" <<<"$out" && ok "tla $1: $2" || { bad "tla $1: expected '$2'"; echo "$out" | tail -20; }
+    # $2 is a regular expression: TLC words the temporal case "Temporal properties were violated" or
+    # "Temporal property ... is violated", depending on the version.
+    grep -Eq "$2" <<<"$out" && ok "tla $1: $2" || { bad "tla $1: expected '$2'"; echo "$out" | grep -Ei 'violat|^Error' | head -5; echo "$out" | tail -20; }
   fi
 }
 
@@ -41,9 +43,9 @@ echo "TLA+: spec/tla/QueryLifecycle.tla"
 tlc Proposed pass
 tlc ProposedLive pass
 tlc Current 'Invariant NoSilentLoss is violated'
-tlc BeforeQueue 'Temporal properties were violated'
-tlc NoRefire 'Temporal properties were violated'
-tlc NoConnCheck 'Temporal properties were violated'
+tlc BeforeQueue 'Temporal propert(y|ies).*(violated|is violated|were violated)'
+tlc NoRefire 'Temporal propert(y|ies).*(violated|is violated|were violated)'
+tlc NoConnCheck 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 
 echo "Quint: spec/quint/client.qnt"
 if (cd "$root/quint" && quint typecheck client.qnt >/dev/null); then ok "typecheck"; else bad "typecheck"; fi
