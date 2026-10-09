@@ -446,6 +446,19 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
         {
             steps.Add("injection: refused");
         }
+
+        // Well-formed but unknown to the server: the connect must fail, not carry on without it.
+        try
+        {
+            var (c, _, _) = await StartAsync(new JsonObject { ["mssql_set_options"] = new JsonObject { ["NOT_A_SET_OPTION"] = "ON" } });
+            await c.DisposeAsync();
+            steps.Add("unknown option: connected (WRONG)");
+            ok = false;
+        }
+        catch (BackendErrorException)
+        {
+            steps.Add("unknown option: refused by the server");
+        }
         return Result(name, ok ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
     }
 

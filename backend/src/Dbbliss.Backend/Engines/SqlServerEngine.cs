@@ -25,27 +25,34 @@ public sealed partial class SqlServerEngine : IEngine
     [GeneratedRegex("^[A-Za-z_]+$")]
     private static partial Regex OptionName();
 
-    [GeneratedRegex("^[A-Za-z0-9_.-]+$")]
+    [GeneratedRegex(@"^(-?[0-9]+|[A-Za-z0-9_.]+)$")]
     private static partial Regex OptionValue();
 
     /// <summary>
     /// The SET batch for a new session: the defaults, then the user's entries (same name replaces the
     /// default). Names and values are checked against a narrow pattern because they are pasted into SQL.
     /// </summary>
-    internal static string? BuildSetBatch(JsonObject? options)
+    public static string? BuildSetBatch(JsonObject? options)
     {
         var set = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, value) in DefaultSetOptions) set[name] = value;
-        if (options?["mssql_set_options"] is JsonObject user)
+        var configured = options?["mssql_set_options"];
+        if (configured is not null and not JsonObject)
+        {
+            throw new ArgumentException("options.mssql_set_options must be a table of SET option names and values.");
+        }
+        if (configured is JsonObject user)
         {
             foreach (var (name, node) in user)
             {
-                var value = node switch
+                var value = node?.GetValueKind() switch
                 {
-                    JsonValue v when v.TryGetValue<string>(out var str) => str,
-                    JsonValue v when v.TryGetValue<bool>(out var b) => b ? "ON" : "OFF",
-                    JsonValue v when v.TryGetValue<long>(out var n) => n.ToString(CultureInfo.InvariantCulture),
-                    _ => throw new ArgumentException($"options.mssql_set_options.{name} must be a string, number or boolean."),
+                    System.Text.Json.JsonValueKind.String => node.GetValue<string>(),
+                    System.Text.Json.JsonValueKind.True => "ON",
+                    System.Text.Json.JsonValueKind.False => "OFF",
+                    System.Text.Json.JsonValueKind.Number when long.TryParse(node.ToJsonString(), NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out var n)
+                        => n.ToString(CultureInfo.InvariantCulture),
+                    _ => throw new ArgumentException($"options.mssql_set_options.{name} must be a string, an integer or a boolean."),
                 };
                 if (!OptionName().IsMatch(name) || !OptionValue().IsMatch(value))
                 {
