@@ -226,6 +226,10 @@ local steps = {
     'schema_tree_to_an_object',
     function()
       dbbliss.tree()
+      if not pg then
+        -- master is a system database, hidden by default
+        tree.toggle_system()
+      end
       wait('the databases', function()
         return #tree.lines() > 1 and not table.concat(tree.lines(), '\n'):find('loading', 1, true)
       end)
