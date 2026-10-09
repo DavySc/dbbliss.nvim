@@ -3,6 +3,9 @@
 local backend_mod = require('dbbliss.backend')
 local script = require('dbbliss.script')
 local results = require('dbbliss.results')
+local info = require('dbbliss.info')
+local names = require('dbbliss.names')
+local tree = require('dbbliss.tree')
 
 local M = {}
 
@@ -20,12 +23,18 @@ local TRANSACTION_OPEN = 1003
 ---@field connections table<string, dbbliss.ConnectionConfig>
 ---@field backend { cmd: string[]?, shutdown_timeout_ms: integer }
 ---@field results { window_rows: integer, max_col_width: integer }
+---@field info { max_col_width: integer }
+---@field tree { show_system: boolean }
+---@field mappings { info: string|false }  buffer-local keys in SQL buffers
 
 ---@type dbbliss.Config
 local defaults = {
   connections = {},
   backend = { cmd = nil, shutdown_timeout_ms = 7000 },
   results = { window_rows = 1000, max_col_width = 40 },
+  info = { max_col_width = 200 },
+  tree = { show_system = false },
+  mappings = { info = '<M-F1>' },
 }
 
 local state = {
@@ -112,6 +121,20 @@ function M.setup(opts)
       error(('dbbliss: connection %s needs engine and connection_string'):format(name), 0)
     end
   end
+  info.setup({ max_col_width = state.config.info.max_col_width })
+  tree.setup({
+    request = function(conn_id, method, params, cb)
+      M._catalog_request(conn_id, method, params, cb)
+    end,
+    info = function(_, conn_name, node)
+      M._describe(conn_name, M._object_params(node))
+    end,
+    script = function(_, conn_name, node)
+      M._script(conn_name, M._object_params(node))
+    end,
+    show_system = state.config.tree.show_system,
+  })
+  M._apply_mappings()
   results.setup({
     window_rows = state.config.results.window_rows,
     max_col_width = state.config.results.max_col_width,
@@ -134,6 +157,8 @@ local function on_backend_exit(code, signal)
   end
   state.queries = {}
   state.scripts = {}
+  tree._state.trees = {}
+  tree._state.current = nil
   state.connections = {}
   state.connecting = {}
   state.current = nil
@@ -677,6 +702,7 @@ function M.disconnect()
         end
         return
       end
+      tree.forget(id)
       local n = connection_by_id(id)
       if n then
         state.connections[n] = nil
@@ -722,6 +748,154 @@ function M.on_exit()
   if b and not b.exited then
     if not b:shutdown_sync(state.config.backend.shutdown_timeout_ms) then
       io.stderr:write('dbbliss: backend did not shut down in time\n')
+    end
+  end
+end
+
+-- Catalog: object info, the schema tree, scripting ----------------------------------------------
+
+--- A request on the catalog session of a connection. Failures are shown, never swallowed: a name that
+--- matches nothing is a warning the user can fix, anything else an error.
+function M._catalog_request(conn_id, method, params, cb)
+  if not state.backend then
+    return
+  end
+  params = vim.tbl_extend('force', params, { connection_id = conn_id })
+  state.backend:request(method, params, cb)
+end
+
+local CATALOG_USER_ERROR = 1007
+
+local function catalog_error(err)
+  notify(err.message, err.code == CATALOG_USER_ERROR and vim.log.levels.WARN or vim.log.levels.ERROR)
+end
+
+--- The request parameters that name a tree node exactly.
+function M._object_params(node)
+  return {
+    database = node.path.database,
+    schema = node.path.schema,
+    object = node.name,
+    kind = node.kind,
+    identity = node.identity,
+  }
+end
+
+---@param conn_name string
+---@param params table  { name = typed text } or a tree node's M._object_params
+function M._describe(conn_name, params)
+  local conn = state.connections[conn_name]
+  if not conn then
+    return notify(conn_name .. ' is not connected', vim.log.levels.ERROR)
+  end
+  M._catalog_request(conn.id, 'catalog/describe', params, function(err, result)
+    if err then
+      return catalog_error(err)
+    end
+    info.open(result, {
+      connection = conn_name,
+      refresh = function()
+        M._describe(conn_name, params)
+      end,
+      script = function()
+        M._script(conn_name, params)
+      end,
+    })
+  end)
+end
+
+--- A CREATE script in a new buffer, ready to read, edit or run.
+function M._script(conn_name, params)
+  local conn = state.connections[conn_name]
+  if not conn then
+    return notify(conn_name .. ' is not connected', vim.log.levels.ERROR)
+  end
+  M._catalog_request(conn.id, 'catalog/script', params, function(err, result)
+    if err then
+      return catalog_error(err)
+    end
+    vim.cmd('new')
+    local lines = vim.split(result.text, '\n', { plain = true })
+    if lines[#lines] == '' then
+      lines[#lines] = nil
+    end
+    vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+    vim.bo.filetype = 'sql'
+    vim.b.dbbliss_connection = conn_name
+    vim.bo.modified = false
+  end)
+end
+
+--- The name to look up: the argument, or the (schema-qualified) name under the cursor.
+local function name_or_cursor(arg)
+  if arg and arg ~= '' then
+    return arg
+  end
+  local line = vim.api.nvim_get_current_line()
+  local col = vim.api.nvim_win_get_cursor(0)[2]
+  local name = names.at_cursor(line, col)
+  if not name then
+    notify('no object name under the cursor', vim.log.levels.INFO)
+  end
+  return name
+end
+
+--- Object info: columns, types, nullability, defaults, indexes, constraints, foreign keys in and out,
+--- triggers, row estimate (what the engine has; the sections come from the backend).
+---@param name string?  the object as written in SQL; default: the name under the cursor
+function M.info(name)
+  local cname = current_connection()
+  if not cname then
+    return
+  end
+  name = name_or_cursor(name)
+  if name then
+    M._describe(cname, { name = name })
+  end
+end
+
+---@param name string?
+function M.script_object(name)
+  local cname = current_connection()
+  if not cname then
+    return
+  end
+  name = name_or_cursor(name)
+  if name then
+    M._script(cname, { name = name })
+  end
+end
+
+--- The schema browser for the current connection.
+function M.tree()
+  local cname, conn = current_connection()
+  if conn then
+    tree.open(conn.id, cname)
+  end
+end
+
+--- Buffer-local keys in SQL buffers (config.mappings).
+function M._apply_mappings()
+  local lhs = state.config.mappings and state.config.mappings.info
+  local group = vim.api.nvim_create_augroup('dbbliss_mappings', { clear = true })
+  if not lhs then
+    return
+  end
+  local function map(buf)
+    vim.keymap.set('n', lhs, function()
+      M.info()
+    end, { buffer = buf, silent = true, desc = 'dbbliss: object info under the cursor' })
+  end
+  vim.api.nvim_create_autocmd('FileType', {
+    group = group,
+    pattern = { 'sql', 'plsql', 'pgsql', 'mysql' },
+    callback = function(args)
+      map(args.buf)
+    end,
+  })
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) and vim.bo[buf].filetype == 'sql' then
+      map(buf)
     end
   end
 end
@@ -844,6 +1018,18 @@ local subcommands = {
   -- Writes the statement under the cursor (or the range) to a CSV file; the path may be left out.
   export = function(args, range)
     M.export(args[1], range and 'range' or 'statement', range)
+  end,
+  -- Object info for a name (default: the one under the cursor).
+  info = function(args)
+    M.info(table.concat(args, ' '))
+  end,
+  -- The schema browser.
+  tree = function()
+    M.tree()
+  end,
+  -- A CREATE script for a name (default: the one under the cursor).
+  script = function(args)
+    M.script_object(table.concat(args, ' '))
   end,
   -- Fetches the next window of rows of a paused result.
   fetch = function()

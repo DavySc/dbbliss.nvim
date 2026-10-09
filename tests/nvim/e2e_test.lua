@@ -15,6 +15,7 @@ local engine = assert(env.DBBLISS_E2E_ENGINE, 'DBBLISS_E2E_ENGINE not set')
 
 local dbbliss = require('dbbliss')
 local results = require('dbbliss.results')
+local tree = require('dbbliss.tree')
 vim.notify = function() end
 
 dbbliss.setup({
@@ -184,6 +185,119 @@ local steps = {
       expect(lines[1] == 'n,pad', 'header is ' .. lines[1])
       expect(lines[2] == '1,xxx', 'first row is ' .. lines[2])
       expect(text():find('exported 2500 rows', 1, true), 'export notice missing:\n' .. excerpt())
+    end,
+  },
+  {
+    'catalog_setup',
+    function()
+      -- A small table of our own, in the schema the connection reaches without qualification.
+      buffer(vim.split(pg and 'drop table if exists e2e_cat_t;\ncreate table e2e_cat_t (id int primary key, v text not null default \'x\')'
+        or "if object_id('dbo.e2e_cat_t') is not null drop table dbo.e2e_cat_t\nGO\ncreate table dbo.e2e_cat_t (id int not null primary key, v nvarchar(10) not null default N'x')", '\n'))
+      dbbliss.run('buffer')
+      wait('the table', idle)
+      expect(not text():find('stopped:', 1, true), 'setup failed:\n' .. excerpt())
+    end,
+  },
+  {
+    'info_for_the_name_under_the_cursor',
+    function()
+      buffer({ 'select * from e2e_cat_t where id = 1' })
+      vim.api.nvim_win_set_cursor(0, { 1, 17 })
+      dbbliss.info()
+      wait('the info buffer', function()
+        return vim.fn.bufnr('dbbliss://info/db/', false) ~= -1 or #vim.tbl_filter(function(b)
+          return vim.api.nvim_buf_get_name(b):find('dbbliss://info/db/', 1, true) ~= nil
+        end, vim.api.nvim_list_bufs()) > 0
+      end)
+      local info_buf
+      for _, b in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_get_name(b):find('dbbliss://info/db/', 1, true) then
+          info_buf = b
+        end
+      end
+      local lines = table.concat(vim.api.nvim_buf_get_lines(info_buf, 0, -1, false), '\n')
+      expect(lines:find('e2e_cat_t', 1, true), 'the title does not name the table:\n' .. lines)
+      expect(lines:find('── Columns (2) ──', 1, true), 'two columns expected:\n' .. lines)
+      expect(lines:find('── Indexes (1) ──', 1, true), 'the primary key index is missing:\n' .. lines)
+      expect(lines:find('id', 1, true) and lines:find('v', 1, true), 'column names missing')
+    end,
+  },
+  {
+    'schema_tree_to_an_object',
+    function()
+      dbbliss.tree()
+      wait('the databases', function()
+        return #tree.lines() > 1 and not table.concat(tree.lines(), '\n'):find('loading', 1, true)
+      end)
+      local path = pg and { 'public', 'Tables' } or { 'master', 'dbo', 'Tables' }
+      for _, name in ipairs(path) do
+        wait('the line ' .. name, function()
+          for _, n in pairs(tree._state.line_nodes) do
+            if n.name == name then
+              return true
+            end
+          end
+        end)
+        for l, n in pairs(tree._state.line_nodes) do
+          if n.name == name then
+            vim.api.nvim_win_set_cursor(vim.fn.win_findbuf(tree._state.buf)[1], { l, 0 })
+            if not n.expanded then
+              tree.activate()
+            end
+          end
+        end
+      end
+      wait('the table in the tree', function()
+        for _, n in pairs(tree._state.line_nodes) do
+          if n.name == 'e2e_cat_t' then
+            return true
+          end
+        end
+      end)
+      for l, n in pairs(tree._state.line_nodes) do
+        if n.name == 'e2e_cat_t' then
+          vim.api.nvim_win_set_cursor(vim.fn.win_findbuf(tree._state.buf)[1], { l, 0 })
+        end
+      end
+      local before = #vim.api.nvim_list_bufs()
+      tree.script()
+      wait('the script buffer', function()
+        return #vim.api.nvim_list_bufs() > before
+      end)
+      local first = vim.api.nvim_buf_get_lines(0, 0, 1, false)[1]
+      expect(first:upper():find('CREATE TABLE', 1, true), 'the script does not start with CREATE TABLE: ' .. tostring(first))
+      expect(vim.bo.filetype == 'sql', 'the script buffer is not SQL')
+    end,
+  },
+  {
+    'script_by_name_round_trip',
+    function()
+      local before = #vim.api.nvim_list_bufs()
+      dbbliss.script_object('e2e_cat_t')
+      wait('the script buffer', function()
+        return #vim.api.nvim_list_bufs() > before
+      end)
+      local script = table.concat(vim.api.nvim_buf_get_lines(0, 0, -1, false), '\n')
+      -- Drop the table, run the script from the buffer, and look at the table again.
+      buffer({ pg and 'drop table e2e_cat_t' or 'drop table dbo.e2e_cat_t' })
+      dbbliss.run('buffer')
+      wait('the drop', idle)
+      buffer(vim.split(script, '\n'))
+      dbbliss.run('buffer')
+      wait('the script to run', idle)
+      expect(not text():find('stopped:', 1, true), 'the script did not run:\n' .. excerpt())
+      buffer({ 'select count(*) as n from ' .. (pg and 'e2e_cat_t' or 'dbo.e2e_cat_t') })
+      dbbliss.run('buffer')
+      wait('the select', idle)
+      expect(text():find('(1 row)', 1, true), 'the recreated table cannot be read:\n' .. excerpt())
+    end,
+  },
+  {
+    'catalog_cleanup',
+    function()
+      buffer({ pg and 'drop table if exists e2e_cat_t' or "if object_id('dbo.e2e_cat_t') is not null drop table dbo.e2e_cat_t" })
+      dbbliss.run('buffer')
+      wait('the cleanup', idle)
     end,
   },
 }

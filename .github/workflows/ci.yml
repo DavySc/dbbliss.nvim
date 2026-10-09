@@ -94,6 +94,7 @@ jobs:
         run: |
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/results_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/catalog_test.lua
 
       - name: End-to-end through the plugin (both engines)
         shell: bash
