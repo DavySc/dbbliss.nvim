@@ -265,6 +265,15 @@ local tests = {
     end,
   },
   {
+    -- SQL Server error texts contain line breaks; nvim_buf_set_lines refuses them.
+    'notes_with_line_breaks_become_lines',
+    function()
+      reset()
+      results.note({ '-- error (line 2): Operation cancelled by user.\r\nThe statement has been terminated.', '-- done' }, 'DbblissError')
+      eq(results.lines(), { '-- error (line 2): Operation cancelled by user.', 'The statement has been terminated.', '-- done' }, 'buffer')
+    end,
+  },
+  {
     'clear_starts_a_fresh_run',
     function()
       reset()

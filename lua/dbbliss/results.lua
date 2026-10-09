@@ -217,17 +217,21 @@ local function whole_line(offset, text, group)
   return { offset, 0, #text, group }
 end
 
---- Plain output lines: notes, status, errors.
+--- Plain output lines: notes, status, errors. A line holding line breaks (SQL Server error texts
+--- do) becomes several lines.
 ---@param lines string[]
 ---@param group string?  highlight group for every line
 function M.note(lines, group)
-  local marks = {}
-  for i, text in ipairs(lines) do
-    if group and text ~= '' then
-      marks[#marks + 1] = whole_line(i - 1, text, group)
+  local flat, marks = {}, {}
+  for _, text in ipairs(lines) do
+    for _, part in ipairs(vim.split((text:gsub('\r', '')), '\n', { plain = true })) do
+      flat[#flat + 1] = part
+      if group and part ~= '' then
+        marks[#marks + 1] = whole_line(#flat - 1, part, group)
+      end
     end
   end
-  append(lines, marks)
+  append(flat, marks)
 end
 
 --- Starts a fresh run: the buffers are emptied.
