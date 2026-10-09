@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using System.Collections.Concurrent;
+using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Engines;
 
 namespace Dbbliss.ProtocolTests;
@@ -35,6 +36,10 @@ public sealed class FakeServer
 public sealed class FakeEngine(FakeServer server) : IEngine
 {
     public string Name => "fake";
+
+    public FakeCatalog FakeCatalog { get; } = new();
+
+    public ICatalog? Catalog => FakeCatalog;
 
     public Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct) =>
         Task.FromResult<IEngineSession>(server.OpenSession());

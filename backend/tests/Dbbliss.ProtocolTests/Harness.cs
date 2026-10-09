@@ -26,6 +26,8 @@ public sealed class Harness : IAsyncDisposable
 
     public FakeServer Server { get; } = new();
 
+    public FakeEngine Engine { get; }
+
     public Backend.Backend Backend { get; }
 
     /// <summary>The backend's stdout. Can hold the backend right after it has written a chosen message.</summary>
@@ -35,7 +37,8 @@ public sealed class Harness : IAsyncDisposable
     {
         var backendIn = new AnonymousPipeClientStream(PipeDirection.In, _stdin.ClientSafePipeHandle);
         Stdout = new HoldingStream(new AnonymousPipeClientStream(PipeDirection.Out, _stdout.ClientSafePipeHandle));
-        Backend = new Backend.Backend(new Output(Stdout), [new FakeEngine(Server)]);
+        Engine = new FakeEngine(Server);
+        Backend = new Backend.Backend(new Output(Stdout), [Engine]);
         _writer = new StreamWriter(_stdin, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
         _run = Task.Run(() => Backend.RunAsync(backendIn));
         _read = Task.Run(ReadLoopAsync);

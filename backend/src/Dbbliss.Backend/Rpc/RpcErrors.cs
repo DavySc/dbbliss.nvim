@@ -17,6 +17,8 @@ public static class RpcErrors
     public const int CredentialNotFound = 1004;
     public const int Database = 1005;
     public const int ShuttingDown = 1006;
+    /// <summary>A catalog request the user can fix: the name matched nothing, or too much.</summary>
+    public const int Catalog = 1007;
 }
 
 public sealed class RpcException(int code, string message, JsonNode? data = null) : Exception(message)

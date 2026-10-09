@@ -1,4 +1,5 @@
 using System.Globalization;
+using Dbbliss.Backend.Catalog;
 using Npgsql;
 
 namespace Dbbliss.Backend.Engines;
@@ -18,6 +19,8 @@ public sealed class PostgresEngine(Instances? instances = null) : IEngine
     private const int DefaultConnectionCheckMs = 2000;
 
     public string Name => "postgres";
+
+    public ICatalog? Catalog { get; } = new PostgresCatalog();
 
     public async Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct)
     {
@@ -164,6 +167,16 @@ public sealed class PostgresEngine(Instances? instances = null) : IEngine
             {
                 control.ClearProtocolCancel();
             }
+        }
+
+        public async Task<IReadOnlyList<QueryTable>> QueryAsync(string sql, IReadOnlyDictionary<string, object?>? parameters, CancellationToken ct)
+        {
+            await using var cmd = new NpgsqlCommand(sql, conn) { CommandTimeout = 30 };
+            if (parameters is not null)
+            {
+                foreach (var (name, value) in parameters) cmd.Parameters.AddWithValue(name, value ?? DBNull.Value);
+            }
+            return await AdoQuery.ReadAllAsync(cmd, ct);
         }
 
         public async Task BeginTransactionAsync(CancellationToken ct)

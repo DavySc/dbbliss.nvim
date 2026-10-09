@@ -37,6 +37,25 @@ public abstract class EngineProfile
 
     public abstract Task<DbConnection> OpenObserverAsync();
 
+    /// <summary>Phase 2: creates the objects the catalog scenarios look at (schema dbbliss_cat). Empty: the engine has no catalog.</summary>
+    public virtual Task CreateCatalogFixtureAsync(DbConnection observer) => Task.CompletedTask;
+
+    public virtual Task DropCatalogFixtureAsync(DbConnection observer) => Task.CompletedTask;
+
+    public virtual bool HasCatalog => false;
+
+    /// <summary>The database holding the fixture.</summary>
+    public virtual Task<string> CatalogDatabaseAsync(DbConnection observer) => Task.FromResult("");
+
+    /// <summary>A name as the user would type it to reach a fixture object (SQL Server: through the database).</summary>
+    public virtual string Qualify(string schemaAndName) => schemaAndName;
+
+    /// <summary>Statements that drop the scripted fixture objects, dependants first.</summary>
+    public virtual IReadOnlyList<string> DropScriptedObjectsSql => [];
+
+    /// <summary>Overload identity of dbbliss_cat.add_one as the tree reports it (PostgreSQL only).</summary>
+    public virtual string? AddOneIdentity => null;
+
     public abstract Task<ServerView> ViewAsync(DbConnection observer, string serverSessionId);
 
     public abstract string CreateProbeTableSql(string table);
@@ -84,6 +103,60 @@ public sealed class PostgresProfile : EngineProfile
     // SRF in the select list streams (ProjectSet); in FROM it would materialize first.
     public override string StreamingSql => "SELECT generate_series(1, 100000000) AS n, repeat('x', 200) AS pad";
 
+    public override bool HasCatalog => true;
+
+    public override string? AddOneIdentity => "a integer";
+
+    private static readonly string[] CatalogFixture =
+    [
+        "DROP SCHEMA IF EXISTS dbbliss_cat CASCADE",
+        "CREATE SCHEMA dbbliss_cat",
+        """
+        CREATE TABLE dbbliss_cat.customer (
+            id integer GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+            email text NOT NULL UNIQUE,
+            name varchar(100) DEFAULT 'anonymous',
+            created timestamptz NOT NULL DEFAULT now(),
+            CONSTRAINT customer_name_not_blank CHECK (length(name) > 0))
+        """,
+        "COMMENT ON TABLE dbbliss_cat.customer IS 'People who buy things'",
+        """
+        CREATE TABLE dbbliss_cat."Order Line" (
+            order_id integer NOT NULL,
+            line integer NOT NULL,
+            customer_id integer NOT NULL REFERENCES dbbliss_cat.customer(id) ON DELETE CASCADE,
+            qty numeric(10,2) NOT NULL DEFAULT 1,
+            total numeric GENERATED ALWAYS AS (qty * 2) STORED,
+            PRIMARY KEY (order_id, line))
+        """,
+        "CREATE INDEX order_line_customer ON dbbliss_cat.\"Order Line\" (customer_id, qty DESC) WHERE qty > 0",
+        "CREATE VIEW dbbliss_cat.customer_names AS SELECT id, name FROM dbbliss_cat.customer",
+        "CREATE FUNCTION dbbliss_cat.add_one(a integer) RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT a + 1 $$",
+        "CREATE FUNCTION dbbliss_cat.add_one(a numeric, b numeric) RETURNS numeric LANGUAGE sql AS $$ SELECT a + b $$",
+        "CREATE PROCEDURE dbbliss_cat.noop() LANGUAGE sql AS $$ SELECT 1 $$",
+        "CREATE FUNCTION dbbliss_cat.touch() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RETURN NEW; END $$",
+        "CREATE TRIGGER customer_touch BEFORE UPDATE ON dbbliss_cat.customer FOR EACH ROW EXECUTE FUNCTION dbbliss_cat.touch()",
+    ];
+
+    public override async Task CreateCatalogFixtureAsync(DbConnection observer)
+    {
+        foreach (var sql in CatalogFixture) await ExecAsync(observer, sql);
+    }
+
+    public override Task DropCatalogFixtureAsync(DbConnection observer) => ExecAsync(observer, "DROP SCHEMA IF EXISTS dbbliss_cat CASCADE");
+
+    public override async Task<string> CatalogDatabaseAsync(DbConnection observer) =>
+        (await FirstRowAsync(observer, "SELECT current_database()")).Values[0]?.ToString() ?? "";
+
+    public override IReadOnlyList<string> DropScriptedObjectsSql =>
+    [
+        "DROP PROCEDURE dbbliss_cat.noop()",
+        "DROP FUNCTION dbbliss_cat.add_one(integer)",
+        "DROP VIEW dbbliss_cat.customer_names",
+        "DROP TABLE dbbliss_cat.\"Order Line\"",
+        "DROP TABLE dbbliss_cat.customer",
+    ];
+
     public override async Task<DbConnection> OpenObserverAsync()
     {
         var b = new NpgsqlConnectionStringBuilder(ConnectionString) { Pooling = false, ApplicationName = "dbbliss-observer" };
@@ -123,6 +196,64 @@ public sealed class SqlServerProfile : EngineProfile
     public override string? BatchThenSleepSql => "SELECT 1 AS a; WAITFOR DELAY '00:01:00'";
     public override string StreamingSql =>
         "SELECT TOP (100000000) a.object_id, REPLICATE('x', 200) AS pad FROM sys.all_columns a CROSS JOIN sys.all_columns b CROSS JOIN sys.all_columns c";
+
+    public override bool HasCatalog => true;
+
+    // The fixture lives in a database of its own, so the scenarios also reach another database than
+    // the connection's (the connection string names none: master).
+    private const string CatalogDb = "dbbliss_cattest";
+
+    private static readonly string[] CatalogFixture =
+    [
+        "CREATE SCHEMA dbbliss_cat",
+        """
+        CREATE TABLE dbbliss_cat.customer (
+            id int IDENTITY(1,1) NOT NULL CONSTRAINT pk_customer PRIMARY KEY,
+            email nvarchar(200) NOT NULL CONSTRAINT uq_customer_email UNIQUE,
+            name nvarchar(100) NULL CONSTRAINT df_customer_name DEFAULT N'anonymous',
+            created datetime2(3) NOT NULL CONSTRAINT df_customer_created DEFAULT SYSUTCDATETIME(),
+            CONSTRAINT ck_customer_name CHECK (LEN(name) > 0))
+        """,
+        """
+        CREATE TABLE dbbliss_cat.[Order Line] (
+            order_id int NOT NULL,
+            line int NOT NULL,
+            customer_id int NOT NULL CONSTRAINT fk_orderline_customer FOREIGN KEY REFERENCES dbbliss_cat.customer(id) ON DELETE CASCADE,
+            qty decimal(10,2) NOT NULL CONSTRAINT df_orderline_qty DEFAULT 1,
+            total AS (qty * 2) PERSISTED,
+            CONSTRAINT pk_orderline PRIMARY KEY (order_id, line))
+        """,
+        "CREATE INDEX ix_orderline_customer ON dbbliss_cat.[Order Line] (customer_id, qty DESC) INCLUDE (line) WHERE qty > 0",
+        "CREATE VIEW dbbliss_cat.customer_names AS SELECT id, name FROM dbbliss_cat.customer",
+        "CREATE FUNCTION dbbliss_cat.add_one(@a int) RETURNS int AS BEGIN RETURN @a + 1 END",
+        "CREATE PROCEDURE dbbliss_cat.noop AS SELECT 1",
+        "CREATE TRIGGER dbbliss_cat.customer_touch ON dbbliss_cat.customer AFTER UPDATE AS SET NOCOUNT ON",
+    ];
+
+    public override async Task CreateCatalogFixtureAsync(DbConnection observer)
+    {
+        await DropCatalogFixtureAsync(observer);
+        await ExecAsync(observer, "CREATE DATABASE " + CatalogDb);
+        observer.ChangeDatabase(CatalogDb);
+        foreach (var sql in CatalogFixture) await ExecAsync(observer, sql);
+        observer.ChangeDatabase("master");
+    }
+
+    public override Task DropCatalogFixtureAsync(DbConnection observer) => ExecAsync(observer,
+        $"IF DB_ID('{CatalogDb}') IS NOT NULL BEGIN ALTER DATABASE {CatalogDb} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {CatalogDb}; END");
+
+    public override Task<string> CatalogDatabaseAsync(DbConnection observer) => Task.FromResult(CatalogDb);
+
+    public override string Qualify(string schemaAndName) => CatalogDb + "." + schemaAndName;
+
+    public override IReadOnlyList<string> DropScriptedObjectsSql =>
+    [
+        $"USE {CatalogDb}; DROP PROCEDURE dbbliss_cat.noop",
+        $"USE {CatalogDb}; DROP FUNCTION dbbliss_cat.add_one",
+        $"USE {CatalogDb}; DROP VIEW dbbliss_cat.customer_names",
+        $"USE {CatalogDb}; DROP TABLE dbbliss_cat.[Order Line]",
+        $"USE {CatalogDb}; DROP TABLE dbbliss_cat.customer",
+    ];
 
     public override async Task<DbConnection> OpenObserverAsync()
     {

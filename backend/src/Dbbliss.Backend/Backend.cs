@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Engines;
 using Dbbliss.Backend.Rpc;
 using Dbbliss.Backend.Scripts;
@@ -29,6 +30,9 @@ public sealed class Backend
 
     /// <summary>How long shutdown waits for cancelled queries before closing their connections anyway.</summary>
     private static readonly TimeSpan ShutdownQueryWait = TimeSpan.FromSeconds(5);
+
+    /// <summary>A catalog operation (opening its session included) gets this long.</summary>
+    private static readonly TimeSpan CatalogTimeout = TimeSpan.FromSeconds(60);
 
     private readonly Output _output;
     private readonly Dictionary<string, IEngine> _engines;
@@ -156,6 +160,10 @@ public sealed class Backend
             "execute" => Execute(p),
             "cancel" => new Reply(Cancel(p)),
             "fetch" => new Reply(Fetch(p)),
+            "catalog/children" => new Reply(await CatalogAsync(p, (cat, session, ct) => ChildrenAsync(cat, session, p, ct))),
+            "catalog/describe" => new Reply(await CatalogAsync(p, async (cat, session, ct) => (await cat.DescribeAsync(session, ObjectOf(p), ct)).ToJson())),
+            "catalog/script" => new Reply(await CatalogAsync(p, async (cat, session, ct) =>
+                new JsonObject { ["text"] = await cat.ScriptAsync(session, ObjectOf(p), ct) })),
             "transaction/begin" => await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)),
             "transaction/commit" => await TransactionAsync(p, (s, ct) => s.CommitAsync(ct)),
             "transaction/rollback" => await TransactionAsync(p, (s, ct) => s.RollbackAsync(ct)),
@@ -182,7 +190,7 @@ public sealed class Backend
         }
         var spec = new ConnectionSpec(Str(p, "connection_string"), Credentials.Resolve(p["password"]), p["options"] as JsonObject);
         var id = "c" + Interlocked.Increment(ref _nextConnection);
-        var connection = new Connection(id, engine, _output);
+        var connection = new Connection(id, engine, _output, spec);
         try
         {
             connection.Session = await engine.OpenAsync(spec, connection, CancellationToken.None);
@@ -217,6 +225,7 @@ public sealed class Backend
                     $"The connection has an open transaction ({transaction}). Commit or roll back first, or disconnect with rollback = true.");
             }
             _connections.TryRemove(connection.Id, out _);
+            await connection.CloseCatalogAsync();
             await connection.Session.DisposeAsync();
             Log.Info($"connection {connection.Id} closed{(transaction != "none" ? $" (transaction {transaction} rolled back)" : "")}");
             return new JsonObject { ["rolled_back"] = transaction != "none" };
@@ -476,6 +485,94 @@ public sealed class Backend
         }
     }
 
+    /// <summary>
+    /// Runs a catalog operation on the connection's catalog session: a second session, opened on first
+    /// use, so an aborted transaction or a running query on the user's session does not stop it. One
+    /// operation at a time. A driver error drops the session (it reopens next time).
+    /// </summary>
+    private async Task<JsonObject> CatalogAsync(JsonObject p, Func<ICatalog, IEngineSession, CancellationToken, Task<JsonObject>> work)
+    {
+        var connection = GetConnection(p);
+        var catalog = connection.Engine.Catalog
+            ?? throw new RpcException(RpcErrors.InvalidParams, $"{connection.Engine.Name} has no catalog support yet.");
+        using var timeout = new CancellationTokenSource(CatalogTimeout);
+        try
+        {
+            await connection.CatalogLock.WaitAsync(timeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new RpcException(RpcErrors.Database, $"Another catalog request on {connection.Id} did not finish within {CatalogTimeout.TotalSeconds:0} s.");
+        }
+        try
+        {
+            if (connection.CatalogSession is null)
+            {
+                IEngineSession session;
+                try
+                {
+                    session = await connection.Engine.OpenAsync(connection.Spec, new DiscardMessages(), timeout.Token);
+                    await catalog.PrepareAsync(session, timeout.Token);
+                }
+                catch (Exception ex) when (ex is not (RpcException or OperationCanceledException))
+                {
+                    throw DatabaseError(connection.Engine, ex);
+                }
+                connection.CatalogSession = session;
+                Log.Info($"connection {connection.Id}: catalog session open ({session.ServerSessionId})");
+            }
+            try
+            {
+                var result = await work(catalog, connection.CatalogSession, timeout.Token);
+                // Which server session answered: a tool that watches the server can tell it from the user's.
+                result["catalog_session"] = connection.CatalogSession.ServerSessionId;
+                return result;
+            }
+            catch (CatalogException ex)
+            {
+                throw new RpcException(RpcErrors.Catalog, ex.Message);
+            }
+            catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+            {
+                await connection.CloseCatalogLockedAsync();
+                throw new RpcException(RpcErrors.Database, $"The catalog query did not finish within {CatalogTimeout.TotalSeconds:0} s.");
+            }
+            catch (Exception ex) when (ex is not RpcException)
+            {
+                await connection.CloseCatalogLockedAsync();
+                throw DatabaseError(connection.Engine, ex);
+            }
+        }
+        finally
+        {
+            connection.CatalogLock.Release();
+        }
+    }
+
+    private static async Task<JsonObject> ChildrenAsync(ICatalog catalog, IEngineSession session, JsonObject p, CancellationToken ct)
+    {
+        var path = new CatalogPath(OptStr(p, "database"), OptStr(p, "schema"), OptStr(p, "folder"));
+        var nodes = await catalog.ChildrenAsync(session, path, ct);
+        return new JsonObject { ["nodes"] = new JsonArray(nodes.Select(n => (JsonNode)n.ToJson()).ToArray()) };
+    }
+
+    private static ObjectRequest ObjectOf(JsonObject p)
+    {
+        var typed = OptStr(p, "name");
+        var obj = OptStr(p, "object");
+        if (typed is null && obj is null) throw new RpcException(RpcErrors.InvalidParams, "Missing parameter name or object.");
+        return new ObjectRequest(typed, OptStr(p, "database"), OptStr(p, "schema"), obj, OptStr(p, "kind"), OptStr(p, "identity"));
+    }
+
+    private static string? OptStr(JsonObject p, string name) => p[name]?.GetValue<string>() is { Length: > 0 } s ? s : null;
+
+    private sealed class DiscardMessages : IMessageSink
+    {
+        public void Message(string severity, string text, int? number = null, int? line = null)
+        {
+        }
+    }
+
     private static async Task<JsonObject> TransactionAsync(Connection connection, Func<IEngineSession, CancellationToken, Task> action)
     {
         try
@@ -547,7 +644,7 @@ public sealed class Backend
             }
             foreach (var connection in _connections.Values)
             {
-                var close = connection.Session.DisposeAsync().AsTask();
+                var close = Task.WhenAll(connection.CloseCatalogAsync(), connection.Session.DisposeAsync().AsTask());
                 if (await Task.WhenAny(close, Task.Delay(TimeSpan.FromSeconds(5))) != close)
                 {
                     Log.Warn($"connection {connection.Id}: close timed out");
@@ -632,9 +729,44 @@ public sealed class Backend
     }
 
     /// <summary>One open connection. At most one operation (query or transaction call) at a time.</summary>
-    private sealed class Connection(string id, IEngine engine, Output output) : IMessageSink
+    private sealed class Connection(string id, IEngine engine, Output output, ConnectionSpec spec) : IMessageSink
     {
         private readonly SemaphoreSlim _busy = new(1, 1);
+
+        public ConnectionSpec Spec { get; } = spec;
+
+        /// <summary>The catalog session (see CatalogAsync); guarded by <see cref="CatalogLock"/>.</summary>
+        public IEngineSession? CatalogSession { get; set; }
+        public SemaphoreSlim CatalogLock { get; } = new(1, 1);
+
+        public async Task CloseCatalogAsync()
+        {
+            await CatalogLock.WaitAsync();
+            try
+            {
+                await CloseCatalogLockedAsync();
+            }
+            finally
+            {
+                CatalogLock.Release();
+            }
+        }
+
+        /// <summary>Disposes the catalog session; the caller holds <see cref="CatalogLock"/>.</summary>
+        public async Task CloseCatalogLockedAsync()
+        {
+            var session = CatalogSession;
+            CatalogSession = null;
+            if (session is null) return;
+            try
+            {
+                await session.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                Log.Warn($"connection {Id}: closing the catalog session failed: {ex.Message}");
+            }
+        }
 
         public string Id { get; } = id;
         public IEngine Engine { get; } = engine;

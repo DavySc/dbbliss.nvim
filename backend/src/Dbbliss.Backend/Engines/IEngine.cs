@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Scripts;
 
 namespace Dbbliss.Backend.Engines;
@@ -10,6 +11,9 @@ public interface IEngine
 
     /// <summary>How scripts for this engine split into the units sent to the server one at a time.</summary>
     ScriptDialect Dialect => ScriptDialect.Semicolon;
+
+    /// <summary>Catalog queries (schema tree, object info, scripting); null if the engine has none.</summary>
+    ICatalog? Catalog => null;
 
     Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct);
 
@@ -46,6 +50,13 @@ public interface IEngineSession : IAsyncDisposable
     Task CommitAsync(CancellationToken ct);
     Task RollbackAsync(CancellationToken ct);
 
+    /// <summary>
+    /// Runs a read-only query and returns every result set, for catalog work. Parameters are named
+    /// without the @ and written @name in the SQL. Not for the user's statements: those stream.
+    /// </summary>
+    Task<IReadOnlyList<QueryTable>> QueryAsync(string sql, IReadOnlyDictionary<string, object?>? parameters, CancellationToken ct) =>
+        throw new NotSupportedException("This engine cannot run catalog queries.");
+
     /// <summary>Asks the server what state the transaction is in. Never answers from local bookkeeping alone.</summary>
     Task<TransactionState> GetTransactionStateAsync(CancellationToken ct);
 }
@@ -61,6 +72,14 @@ public enum TransactionState
 }
 
 public sealed record ColumnInfo(string Name, string Type);
+
+/// <summary>One result set read completely, for catalog queries.</summary>
+public sealed record QueryTable(IReadOnlyList<string> Columns, IReadOnlyList<object?[]> Rows)
+{
+    public int Index(string column) => Columns.ToList().FindIndex(c => string.Equals(c, column, StringComparison.OrdinalIgnoreCase)) is var i and >= 0
+        ? i
+        : throw new InvalidOperationException($"No column {column}.");
+}
 
 public sealed record ExecuteSummary(long RowsAffected);
 

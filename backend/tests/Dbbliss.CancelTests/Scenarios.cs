@@ -9,7 +9,7 @@ public enum Outcome { Pass, Fail, Skip, Info }
 public sealed record ScenarioResult(string Engine, string Scenario, Outcome Outcome, string Detail, long? ServerStopMs = null);
 
 /// <summary>The Phase 0 scenarios. Every one checks the server from an observer connection.</summary>
-public sealed class Scenarios(EngineProfile profile, Settings settings)
+public sealed partial class Scenarios(EngineProfile profile, Settings settings)
 {
     private const int ExecutingTimeoutMs = 15000;
     private const int DoneTimeoutMs = 15000;
@@ -22,6 +22,11 @@ public sealed class Scenarios(EngineProfile profile, Settings settings)
     {
         yield return ("sleep_cancel", () => CancelLongQuery("sleep_cancel", profile.SleepSql));
         foreach (var (name, sql) in profile.ExtraLongQueries) yield return (name, () => CancelLongQuery(name, sql));
+        if (profile.HasCatalog)
+        {
+            yield return ("catalog_browse_describe_script", CatalogBrowseDescribeScript);
+            yield return ("catalog_independent_of_user_session", CatalogIndependentOfUserSession);
+        }
         yield return ("error_line_in_buffer", ErrorLineInBuffer);
         yield return ("cancel_immediately", CancelImmediately);
         if (profile.BatchThenSleepSql is not null) yield return ("batch_cancel_keeps_results", BatchCancelKeepsResults);
