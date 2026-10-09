@@ -6,8 +6,28 @@ protocol-level cancel, no lost results, no surprise commits.
 The plugin (Lua, Neovim 0.10+) talks to one persistent .NET 10 backend process over
 line-delimited JSON-RPC on stdio.
 
-> **Status: Phase 0 (cancel spike) complete, awaiting review.** Cancel works and is verified for PostgreSQL and SQL Server
-> on Linux and Windows. DB2 for i is deferred. See [docs/phase0-results.md](docs/phase0-results.md).
+> **Status: Phase 1 (core query loop) done.** Statement scopes, paged results, a results buffer,
+> prod/transaction safety and credential stores, for PostgreSQL and SQL Server on Linux and
+> Windows. Decisions to review: [docs/phase1-decisions.md](docs/phase1-decisions.md); Phase 0
+> (cancel) results: [docs/phase0-results.md](docs/phase0-results.md). DB2 for i is deferred.
+
+## Try it
+
+```sh
+scripts/build.sh                         # or scripts\build.ps1 on Windows; needs the .NET 10 SDK
+```
+Put the repository on your `runtimepath` (lazy.nvim: `{ dir = '/path/to/dbbliss.nvim', config = function() ... end }`),
+call `setup` as below, then in an SQL buffer:
+
+```
+:Dbbliss connect local_pg
+:Dbbliss exec            " the statement under the cursor
+:Dbbliss exec_all        " the whole buffer
+```
+Use `:Dbbliss status` to see what is open, and `:Dbbliss cancel` to stop a query (it works while
+the server is busy, and on a paused result). Add `require('dbbliss').statusline()` to your
+`'statusline'` to see the connection, `PROD`, an open transaction and a running query.
+Needs Neovim 0.10 or newer.
 
 ## Build the backend
 
@@ -40,6 +60,21 @@ require('dbbliss').setup({
   },
 })
 ```
+
+### Passwords
+
+`password` names where to find the password; the plugin never holds it. Exactly one of:
+
+| | |
+|---|---|
+| `{ env = 'NAME' }` | an environment variable of the backend (Neovim's environment) |
+| `{ credman = 'target' }` | a **generic** credential in Windows Credential Manager: `cmdkey /generic:target /user:me /pass:...` |
+| `{ pass = 'path/entry' }` | the first line of `pass show path/entry` |
+| `{ libsecret = { service = 'dbbliss', account = 'prod' } }` | `secret-tool lookup service dbbliss account prod` |
+
+Leave `password` out for integrated authentication (`Integrated Security=true` in the connection
+string): SSPI on Windows, a Kerberos ticket (`kinit`) on Linux. `env = 'prod'` on a connection makes
+every statement that can change data ask for confirmation first.
 
 ## Use
 
