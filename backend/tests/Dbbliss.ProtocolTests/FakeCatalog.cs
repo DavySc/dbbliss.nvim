@@ -12,6 +12,9 @@ public sealed class FakeCatalog : ICatalog
 {
     public List<string> SessionsUsed { get; } = [];
 
+    /// <summary>"hangdeaf" does not return until this is set and ignores cancellation, like a driver stuck in a call.</summary>
+    public TaskCompletionSource Gate { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public Task PrepareAsync(IEngineSession session, CancellationToken ct) => Task.CompletedTask;
 
     public Task<IReadOnlyList<CatalogNode>> ChildrenAsync(IEngineSession session, CatalogPath path, CancellationToken ct)
@@ -23,11 +26,13 @@ public sealed class FakeCatalog : ICatalog
         return Task.FromResult(nodes);
     }
 
-    public Task<ObjectInfo> DescribeAsync(IEngineSession session, ObjectRequest request, CancellationToken ct)
+    public async Task<ObjectInfo> DescribeAsync(IEngineSession session, ObjectRequest request, CancellationToken ct)
     {
         SessionsUsed.Add(session.ServerSessionId);
         Steer(request);
-        return Task.FromResult(new ObjectInfo($"table {request.Typed ?? request.Name}", "table",
+        if ((request.Typed ?? request.Name) == "hang") await Task.Delay(Timeout.Infinite, ct);
+        if ((request.Typed ?? request.Name) == "hangdeaf") await Gate.Task;
+        return (new ObjectInfo($"table {request.Typed ?? request.Name}", "table",
             [new InfoSection("Columns", ["name", "type"], [["id", "integer"], ["note", null]]), InfoSection.OfText("Definition", "line 1\nline 2")]));
     }
 

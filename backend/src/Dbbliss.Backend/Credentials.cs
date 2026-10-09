@@ -22,7 +22,8 @@ namespace Dbbliss.Backend;
 /// </summary>
 public static class Credentials
 {
-    private static readonly TimeSpan ToolTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>How long a credential tool gets (settable for tests).</summary>
+    public static TimeSpan ToolTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     /// <summary>Result of running a command-line tool. Tests substitute a fake.</summary>
     public delegate (int ExitCode, string Output, string Error) ToolRunner(string file, IReadOnlyList<string> args);

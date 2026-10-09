@@ -68,6 +68,12 @@ public sealed class Harness : IAsyncDisposable
         return id;
     }
 
+    /// <summary>Writes one line as it is, for requests that are not well-formed.</summary>
+    public void SendRaw(string line)
+    {
+        lock (_writer) _writer.WriteLine(line);
+    }
+
     /// <summary>Sends a request and returns its response (result or error).</summary>
     public Task<JsonObject> CallAsync(string method, JsonObject? @params = null)
     {
@@ -239,8 +245,18 @@ public sealed class HoldingStream(Stream inner) : Stream
 
     public void Release() => _release?.TrySetResult();
 
+    private string? _failOn;
+    private volatile bool _failed;
+
+    /// <summary>
+    /// Once a message containing <paramref name="text"/> has been written, this and every later write
+    /// fails with an IOException, as a closed stdout does. The reader has seen that message.
+    /// </summary>
+    public void FailAfter(string text) => Volatile.Write(ref _failOn, text);
+
     public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
     {
+        if (_failed) throw new IOException("stdout is closed (simulated)");
         lock (_pending) _pending.Write(buffer.Span);
         await inner.WriteAsync(buffer, ct);
     }
@@ -254,6 +270,7 @@ public sealed class HoldingStream(Stream inner) : Stream
             written = Encoding.UTF8.GetString(_pending.GetBuffer(), 0, (int)_pending.Length);
             _pending.SetLength(0);
         }
+        if (Volatile.Read(ref _failOn) is { } failOn && written.Contains(failOn, StringComparison.Ordinal)) _failed = true;
         if (Volatile.Read(ref _armed) is { } armed && written.Contains(armed, StringComparison.Ordinal))
         {
             Volatile.Write(ref _armed, null);

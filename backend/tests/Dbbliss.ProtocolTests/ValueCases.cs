@@ -63,6 +63,27 @@ public static class ValueCases
         Is("\"0x\"", Array.Empty<byte>());
         Is("\"0x00FF10\"", new byte[] { 0, 255, 16 });
 
+        // Anything else formattable is formatted without the culture; anything unknown becomes its text.
+        Is("\"123456789012345678901234567890\"", System.Numerics.BigInteger.Parse("123456789012345678901234567890"));
+        Is("\"10.0.0.1\"", System.Net.IPAddress.Parse("10.0.0.1"));
+
+        // A whole row from a driver: NULL and DBNull become JSON null, the rest is converted.
+        var table = new System.Data.DataTable();
+        table.Columns.Add("id", typeof(int));
+        table.Columns.Add("name", typeof(string));
+        table.Columns.Add("big", typeof(long));
+        table.Rows.Add(1, "x", (1L << 53) + 1);
+        table.Rows.Add(2, DBNull.Value, DBNull.Value);
+        using (var reader = table.CreateDataReader())
+        {
+            var columns = ValueConverter.Columns(reader);
+            if (string.Join(",", columns.Select(c => c.Name)) != "id,name,big") throw new TestFailure("column names");
+            reader.Read();
+            if (ValueConverter.ReadRow(reader).ToJsonString() != "[1,\"x\",\"9007199254740993\"]") throw new TestFailure("row 1: " + ValueConverter.ReadRow(reader).ToJsonString());
+            reader.Read();
+            if (ValueConverter.ReadRow(reader).ToJsonString() != "[2,null,null]") throw new TestFailure("row 2: " + ValueConverter.ReadRow(reader).ToJsonString());
+        }
+
         // The result does not depend on the thread's culture (a comma-decimal one must not leak).
         var saved = Thread.CurrentThread.CurrentCulture;
         try

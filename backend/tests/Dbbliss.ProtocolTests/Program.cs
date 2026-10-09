@@ -25,6 +25,46 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("typed_begin_blocks_disconnect", "1: NoSilentRollback", TypedBeginBlocksDisconnect),
     // Verifies: LLR-CONC-2, HLR-TX-2
     ("no_stale_report_after_rollback", "2: HonestTxView", NoStaleReportAfterRollback),
+    // Verifies: LLR-WIRE-1
+    ("malformed_requests_get_protocol_errors", "", RobustnessCases.MalformedRequests),
+    // Verifies: LLR-WIRE-2
+    ("invalid_parameters_are_refused", "", RobustnessCases.InvalidParameters),
+    // Verifies: LLR-WIRE-2
+    ("connect_failure_is_a_database_error", "", RobustnessCases.ConnectFailureIsADatabaseError),
+    // Verifies: LLR-WIRE-3
+    ("requests_are_refused_while_shutting_down", "", RobustnessCases.RequestsAreRefusedWhileShuttingDown),
+    // Verifies: HLR-CANCEL-1, HLR-CANCEL-5
+    ("query_control_cases", "", () => { UnitCases.QueryControl(); return Task.CompletedTask; }),
+    // Verifies: LLR-CAT-6
+    ("identifier_quoting_round_trips", "", () => { UnitCases.IdentifierQuoting(); return Task.CompletedTask; }),
+    // Verifies: LLR-CRED-2, HLR-CRED-1
+    ("credential_edges", "", () => { UnitCases.CredentialEdges(); return Task.CompletedTask; }),
+    // Verifies: LLR-LIFE-3, HLR-LIFE-2
+    ("instances_with_an_unusable_state_dir", "", () => { UnitCases.InstancesWithAnUnusableStateDir(); return Task.CompletedTask; }),
+    // Verifies: HLR-PAGE-3
+    ("fetch_without_a_window_grants_nothing", "", UnitCases.FetchWithoutAWindow),
+    // Verifies: HLR-TX-4
+    ("shutdown_is_bounded", "", FailureCases.ShutdownIsBounded),
+    // Verifies: HLR-TX-4
+    ("shutdown_closes_every_session_even_if_one_fails", "", FailureCases.ShutdownClosesEverySessionEvenIfOneFails),
+    // Verifies: LLR-WIRE-4
+    ("server_messages_reach_the_client", "", FailureCases.ServerMessagesReachTheClient),
+    // Verifies: HLR-TX-1
+    ("unknown_transaction_state_blocks_disconnect", "", FailureCases.UnknownTransactionStateBlocksDisconnect),
+    // Verifies: HLR-TX-1
+    ("disconnect_with_rollback_says_what_it_did", "", FailureCases.DisconnectWithRollbackSaysWhatItDid),
+    // Verifies: LLR-WIRE-2, HLR-EXPORT-1
+    ("execute_options", "", FailureCases.ExecuteOptions),
+    // Verifies: HLR-EXPORT-1
+    ("export_write_failure_is_reported", "", FailureCases.ExportWriteFailureIsReported),
+    // Verifies: HLR-CANCEL-3
+    ("rows_past_the_overflow_cap_are_reported", "", FailureCases.RowsPastTheOverflowCapAreReported),
+    // Verifies: LLR-WIRE-5
+    ("broken_stdout_ends_the_backend_cleanly", "", FailureCases.BrokenStdoutEndsTheBackendCleanly),
+    // Verifies: HLR-CAT-4
+    ("catalog_timeouts_are_reported", "", FailureCases.CatalogTimeoutsAreReported),
+    // Verifies: HLR-CAT-4
+    ("catalog_session_failures", "", FailureCases.CatalogSessionFailures),
     // Verifies: HLR-CANCEL-5
     ("cancel_is_resent_and_unacknowledged_cancel_warns", "", CancelIsResentAndWarns),
     // Verifies: HLR-CONC-1

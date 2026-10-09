@@ -25,9 +25,18 @@ public sealed class FakeServer
     public TaskCompletionSource StuckRelease { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     public int CancelRequests;
 
-    internal FakeSession OpenSession()
+    /// <summary>Failure switches for the code that handles a server that misbehaves.</summary>
+    public int? OpensBeforeRefusing { get; set; }
+    public bool BeginThrows { get; set; }
+    public bool DisposeThrows { get; set; }
+    public TaskCompletionSource? DisposeHangs { get; set; }
+    public int OpenCount;
+    public int DisposeAttempts;
+
+    internal FakeSession OpenSession(IMessageSink messages)
     {
-        var session = new FakeSession(this, "s" + Interlocked.Increment(ref _nextSession));
+        if (OpensBeforeRefusing is { } n && Interlocked.Increment(ref OpenCount) > n) throw new FakeServerException("too many sessions");
+        var session = new FakeSession(this, "s" + Interlocked.Increment(ref _nextSession), messages);
         Open[session.ServerSessionId] = session;
         return session;
     }
@@ -48,7 +57,9 @@ public sealed class FakeEngine(FakeServer server) : IEngine
     public ICatalog? Catalog => FakeCatalog;
 
     public Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct) =>
-        Task.FromResult<IEngineSession>(server.OpenSession());
+        spec.ConnectionString == "refuse"
+            ? throw new FakeServerException("connection refused")
+            : Task.FromResult<IEngineSession>(server.OpenSession(messages));
 
     public ErrorInfo DescribeError(Exception ex) =>
         ex is FakeServerException { Position: { } position } ? new ErrorInfo(ex.Message, Position: position) : new ErrorInfo(ex.Message);
@@ -59,7 +70,7 @@ public sealed class FakeEngine(FakeServer server) : IEngine
 /// that aborts an open transaction, as on PostgreSQL), anything else succeeds. The API calls and the
 /// probe act on the server's state, as the IEngineSession contract asks.
 /// </summary>
-public sealed class FakeSession(FakeServer server, string id) : IEngineSession
+public sealed class FakeSession(FakeServer server, string id, IMessageSink messages) : IEngineSession
 {
     private readonly Lock _gate = new();
 
@@ -67,10 +78,31 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
 
     public ServerTx State { get; private set; }
 
+    private bool _probeFails;
+    private bool _probeUnknown;
+
     public Task<ExecuteSummary> ExecuteAsync(string sql, IResultSink sink, QueryControl control)
     {
         if (sql.StartsWith("ROWS ", StringComparison.Ordinal)) return StreamRowsAsync(int.Parse(sql[5..]), sink);
         if (sql == "STUCK") return StuckAsync(control);
+        if (sql.StartsWith("NOTICE ", StringComparison.Ordinal))
+        {
+            messages.Message("info", sql[7..], 1, 1);
+            return Task.FromResult(new ExecuteSummary(-1));
+        }
+        if (sql.StartsWith("LATENOTICE ", StringComparison.Ordinal))
+        {
+            // A message that arrives after the statement has ended, like an asynchronous server notice.
+            var text = sql[11..];
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(100);
+                messages.Message("info", text, null, null);
+            });
+            return Task.FromResult(new ExecuteSummary(-1));
+        }
+        if (sql == "PROBEFAIL") _probeFails = true;
+        if (sql == "PROBEUNKNOWN") _probeUnknown = true;
         lock (_gate)
         {
             switch (sql.Trim().ToUpperInvariant())
@@ -128,6 +160,7 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
 
     public Task BeginTransactionAsync(CancellationToken ct)
     {
+        if (server.BeginThrows) throw new FakeServerException("begin failed");
         lock (_gate)
         {
             if (State != ServerTx.None) throw new InvalidOperationException("A transaction is already open.");
@@ -158,6 +191,8 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
 
     public Task<TransactionState> GetTransactionStateAsync(CancellationToken ct)
     {
+        if (_probeFails) throw new FakeServerException("the probe failed");
+        if (_probeUnknown) return Task.FromResult(TransactionState.Unknown);
         lock (_gate)
         {
             return Task.FromResult(State switch
@@ -169,10 +204,12 @@ public sealed class FakeSession(FakeServer server, string id) : IEngineSession
         }
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        Interlocked.Increment(ref server.DisposeAttempts);
+        if (server.DisposeHangs is { } hang) await hang.Task;
         server.Close(this);
-        return ValueTask.CompletedTask;
+        if (server.DisposeThrows) throw new FakeServerException("the close failed");
     }
 }
 

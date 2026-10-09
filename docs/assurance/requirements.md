@@ -190,6 +190,35 @@ New SQL Server sessions shall apply `SET ARITHABORT ON` and the user's `mssql_se
 value that is not a plain SET option shall fail the connect. Source: commit "SQL Server: start
 sessions with ARITHABORT ON".
 
+## Protocol
+
+### LLR-WIRE-1
+The backend shall answer a request that is not valid JSON with a parse error, one that is not a
+JSON object or has no method with an invalid-request error, and one with an unknown method with a
+method-not-found error naming the method, and shall keep serving. Blank lines shall be ignored, and
+a request without an id shall be performed without a response. Source: JSON-RPC 2.0; decision 10.
+
+### LLR-WIRE-2
+A request with a missing or invalid parameter (unknown engine, missing sql or text, a window below
+1, an export together with a window, fetch of fewer than 1 row, a query id already in use) shall get
+an invalid-params error that names the parameter; an unknown connection shall get its own error
+code; a request about a query that is not running shall get the answer `not_running`, not an error;
+a failed connect shall return the server's message as a database error and leave no session open.
+Source: phase 1 decisions 25, 27.
+
+### LLR-WIRE-3
+After shutdown has begun, every request except `shutdown` shall be refused with a shutting-down
+error, and a repeated `shutdown` shall not fail. Source: decision 13.
+
+### LLR-WIRE-4
+A message the server sends (NOTICE, PRINT, RAISERROR) shall reach the client as `query/message`
+before the query's `query/done` while a query runs, and as `connection/message` otherwise, with its
+severity, text, number and line. Source: decision 29.
+
+### LLR-WIRE-5
+When the backend can no longer write to stdout, whichever message failed, it shall stop writing,
+shut down cleanly and not throw. Source: decision 13 (Neovim gone).
+
 ## Catalog (Phase 2)
 
 ### HLR-CAT-1

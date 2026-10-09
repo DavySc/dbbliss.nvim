@@ -67,6 +67,14 @@ public static class SplitterCases
         new("ms bracketed identifier with ]]", Ms, "select [a]]b] from t\nGO\nselect 2", ["select [a]]b] from t", "select 2"]),
         new("ms comment-only batch dropped", Ms, "-- nothing\nGO\nselect 1", ["select 1"]),
         new("ms crlf", Ms, "select 1\r\nGO\r\nselect 2", ["select 1", "select 2"], Starts: [new(0, 0), new(2, 0)]),
+        new("pg statement starting with a parenthesis", Pg, "(select 1); ('x')", ["(select 1);", "('x')"]),
+        new("pg statement starting with a string", Pg, "'a' ; select 2", ["'a' ;", "select 2"]),
+        new("pg line comment at the end of the input", Pg, "select 1 -- done", ["select 1"]),
+        new("pg lone dollar at the end of the input", Pg, "select $", ["select $"]),
+        new("pg dollar tag at the end of the input", Pg, "select $abc", ["select $abc"]),
+        new("pg unterminated dollar quote runs to the end", Pg, "select $$abc; x", ["select $$abc; x"]),
+        new("ms go with a count too large for an int", Ms, "select 1\nGO 99999999999", ["select 1\nGO 99999999999"]),
+        new("ms go followed by a comment at the end of the input", Ms, "select 1\nGO -- done", ["select 1"]),
         new("ms square bracket is plain text on postgres", Pg, "select a[1]; select 2", ["select a[1];", "select 2"]),
     ];
 

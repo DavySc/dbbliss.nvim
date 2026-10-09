@@ -28,11 +28,14 @@ public sealed class Backend
     /// <summary>A cancel the server has not acknowledged after this long is reported to the user (settable for tests).</summary>
     public TimeSpan CancelWarnAfter { get; set; } = TimeSpan.FromSeconds(10);
 
-    /// <summary>How long shutdown waits for cancelled queries before closing their connections anyway.</summary>
-    private static readonly TimeSpan ShutdownQueryWait = TimeSpan.FromSeconds(5);
+    /// <summary>How long shutdown waits for cancelled queries before closing their connections anyway (settable for tests).</summary>
+    public TimeSpan ShutdownQueryWait { get; set; } = TimeSpan.FromSeconds(5);
 
-    /// <summary>A catalog operation (opening its session included) gets this long.</summary>
-    private static readonly TimeSpan CatalogTimeout = TimeSpan.FromSeconds(60);
+    /// <summary>How long shutdown waits for each connection to close (settable for tests).</summary>
+    public TimeSpan ShutdownCloseWait { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>A catalog operation (opening its session included) gets this long (settable for tests).</summary>
+    public TimeSpan CatalogTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
     private readonly Output _output;
     private readonly Dictionary<string, IEngine> _engines;
@@ -649,13 +652,22 @@ public sealed class Backend
             foreach (var connection in _connections.Values)
             {
                 var close = Task.WhenAll(connection.CloseCatalogAsync(), connection.Session.DisposeAsync().AsTask());
-                if (await Task.WhenAny(close, Task.Delay(TimeSpan.FromSeconds(5))) != close)
+                if (await Task.WhenAny(close, Task.Delay(ShutdownCloseWait)) != close)
                 {
                     Log.Warn($"connection {connection.Id}: close timed out");
                 }
                 else
                 {
-                    Log.Info($"connection {connection.Id} closed (any open transaction rolled back)");
+                    try
+                    {
+                        await close;
+                        Log.Info($"connection {connection.Id} closed (any open transaction rolled back)");
+                    }
+                    catch (Exception ex)
+                    {
+                        // Not "closed": the process exit will drop the socket, but the log must not say it worked.
+                        Log.Warn($"connection {connection.Id}: close failed: {ex.Message}");
+                    }
                 }
             }
             _connections.Clear();
