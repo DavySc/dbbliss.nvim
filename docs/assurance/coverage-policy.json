@@ -20,5 +20,15 @@
     "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs",
     "backend/src/Dbbliss.Backend/Engines/AdoStreaming.cs",
     "backend/src/Dbbliss.Backend/Engines/AdoQuery.cs"
+  ],
+  "ignore_artifacts": [
+    {
+      "pattern": "^\\s*[{}]+[;)]*\\s*$",
+      "reason": "A line holding only braces is not a statement. The compiler gives a closing brace a sequence point (after a throw, at the end of an async method) that no input can reach or miss."
+    },
+    {
+      "pattern": "^\\s*throw;\\s*$",
+      "reason": "The branch the tool attaches to a rethrow in a catch block of an async method is the compiler's state-machine plumbing around the await before it, not a decision in the source."
+    }
   ]
 }

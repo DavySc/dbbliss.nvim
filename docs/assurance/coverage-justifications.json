@@ -89,6 +89,52 @@
    "kind": "both",
    "category": "unreachable",
    "reason": "The commit refusal for an aborted transaction follows from the state above, which SQL Server never reports between batches (see XACT_STATE -1). PostgreSQL has the same refusal and it is tested there (tx_aborted_commit_refused)."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs",
+   "match": "orphans.Add((r.GetInt32(0)",
+   "kind": "branch",
+   "category": "unreachable",
+   "reason": "query_start can be NULL only for a session that never ran a statement. Every dbbliss session runs statements while connecting (the interval setting and the sweep itself) before it can be killed, so its query_start is set."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs",
+   "match": "var what = $\"pid {pid}, ",
+   "kind": "branch",
+   "category": "unreachable",
+   "reason": "state is NULL only for background workers, never for a client session, and the elapsed seconds are NULL for the same sessions as query_start (see above). The fallbacks in the message exist for a future server, not for any state seen."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs",
+   "match": "messages.Message(\"warning\", ended",
+   "kind": "branch",
+   "category": "defensive",
+   "reason": "pg_terminate_backend returns false when the session is already gone or not ours: a race between listing and ending it. Not provoked by a test; the answer is a different warning text, nothing is ended."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs",
+   "match": "Could not end a session left by a dbbliss backend that was killed ({what}): {ex.",
+   "before": 2,
+   "after": 1,
+   "kind": "line",
+   "category": "defensive",
+   "reason": "Ending the session fails with a server error (for example a session owned by another role, which needs a second database role to provoke). Not tested; the handler turns the error into a warning and the connect goes on."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs",
+   "match": "Could not check for sessions left by killed dbbliss backends",
+   "before": 2,
+   "after": 1,
+   "kind": "line",
+   "category": "defensive",
+   "reason": "Listing the sessions fails (a dropped connection or an unexpected column type). Not tested; the handler turns the error into a warning and the connect goes on, nothing is swept."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs",
+   "match": "return reader.GetInt16(0) switch",
+   "kind": "branch",
+   "category": "unreachable",
+   "reason": "The -1 arm (an uncommittable transaction) is never taken: SQL Server rolls such a transaction back at the end of the batch, before the state is read (see the entry for -1 below)."
   }
  ]
 }

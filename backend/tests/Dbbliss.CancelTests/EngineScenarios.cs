@@ -62,6 +62,13 @@ public sealed partial class Scenarios
             var mine = await FirstValueAsync(c2, conn2, "a2", profile.ApplicationNameSql!);
             step($"user's \"{mine}\"", mine == "my-own-tool");
         }
+        // An empty name is no name: the default applies.
+        var (c3, conn3, _) = await StartAsync(connectionString: profile.ConnectionString.TrimEnd(';') + ";Application Name=");
+        await using (c3)
+        {
+            var empty = await FirstValueAsync(c3, conn3, "a3", profile.ApplicationNameSql!);
+            step($"empty name \"{empty}\"", empty is not null && empty.StartsWith("dbbliss.nvim", StringComparison.Ordinal));
+        }
         return Result("application_name", ok() ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
     }
 
@@ -104,14 +111,15 @@ public sealed partial class Scenarios
     private async Task<ScenarioResult> PgSessionSettings()
     {
         var (steps, step, ok) = Steps();
-        foreach (var (ms, expected) in new (int?, string)[] { (null, "2s"), (5000, "5s"), (0, "0") })
+        foreach (var (ms, expected) in new (int?, string)[] { (null, "2s"), (-1, "2s"), (5000, "5s"), (0, "0") })
         {
-            var options = ms is null ? null : new JsonObject { ["pg_client_connection_check_interval_ms"] = ms };
+            // -1 here stands for "options given, but not this one"
+            var options = ms is null ? null : ms == -1 ? new JsonObject() : new JsonObject { ["pg_client_connection_check_interval_ms"] = ms };
             var (c, conn, _) = await StartAsync(options);
             await using var _c = c;
             var value = await FirstValueAsync(c, conn, "s", "SHOW client_connection_check_interval");
             var want = OperatingSystem.IsWindows() ? "0" : expected;
-            step($"option {(ms is null ? "default" : ms.ToString())}: {value}", value == want);
+            step($"option {(ms is null ? "default" : ms == -1 ? "absent" : ms.ToString())}: {value}", value == want);
         }
         // A value that makes no sense is refused at connect, not ignored.
         try

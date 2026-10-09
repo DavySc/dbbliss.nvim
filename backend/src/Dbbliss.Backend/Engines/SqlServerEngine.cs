@@ -86,7 +86,9 @@ public sealed partial class SqlServerEngine : IEngine
         {
             foreach (SqlError err in e.Errors)
             {
-                messages.Message(err.Class > 10 ? "error" : "info", err.Message, err.Number, err.LineNumber);
+                // SqlClient raises errors (class 11 and above) as exceptions unless FireInfoMessageEventOnUserErrors is
+                // set, which it is not: only messages of class 0 to 10 arrive here.
+                messages.Message("info", err.Message, err.Number, err.LineNumber);
             }
         };
         try
@@ -193,16 +195,14 @@ public sealed partial class SqlServerEngine : IEngine
         public async Task<TransactionState> GetTransactionStateAsync(CancellationToken ct)
         {
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = "SELECT @@TRANCOUNT, XACT_STATE()";
+            // 1: an open transaction that can be committed; -1: one that can only be rolled back; 0: none.
+            cmd.CommandText = "SELECT XACT_STATE()";
             await using var reader = await cmd.ExecuteReaderAsync(ct);
             await reader.ReadAsync(ct);
-            var trancount = reader.GetInt32(0);
-            var xactState = reader.GetInt16(1);
-            return xactState switch
+            return reader.GetInt16(0) switch
             {
                 -1 => TransactionState.Aborted,
                 1 => TransactionState.Active,
-                _ when trancount > 0 => TransactionState.Active,
                 _ => TransactionState.None,
             };
         }

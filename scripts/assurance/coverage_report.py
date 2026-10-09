@@ -150,6 +150,8 @@ def main():
 
     # --- critical files: every miss justified ------------------------------------------------
     js = justification_index(problems)
+    artifact_patterns = [re.compile(a["pattern"]) for a in policy.get("ignore_artifacts", [])]
+    ignored_artifacts = 0
     used = set()
     unjustified = {}
     for f in policy.get("critical", []):
@@ -157,8 +159,13 @@ def main():
         if info is None:
             problems.append(f"critical file {f} has no coverage data")
             continue
+        source = (ROOT / f).read_text(errors="replace").splitlines() if (ROOT / f).exists() else []
         for kind, key in (("line", "missed_lines"), ("branch", "missed_branches")):
             for n in info.get(key, []):
+                text = source[n - 1] if 0 < n <= len(source) else ""
+                if any(rx.search(text) for rx in artifact_patterns):
+                    ignored_artifacts += 1
+                    continue
                 hit = next(
                     (i for i, j in enumerate(js)
                      if j[0] == f and j[1] <= n <= j[2] and j[3] in (kind, "both")),
@@ -222,7 +229,8 @@ def main():
     md += ["", "## Justifications in use", "",
            "`platform`: runs on the other OS in CI, not measured. `unreachable`: the code cannot take that branch. "
            "`defensive`: a handler for a failure that cannot be provoked; it is not tested. "
-           + ", ".join(f"{n} {c}" for c, n in sorted(by_category.items()))]
+           + ", ".join(f"{n} {c}" for c, n in sorted(by_category.items()))
+           + f". {ignored_artifacts} uncovered brace-only or rethrow lines ignored as compiler artifacts (coverage-policy.json)."]
     md += ["", "## Problems", ""] + ([f"- {p}" for p in problems] or ["None."])
     COV.mkdir(exist_ok=True)
     (COV / "summary.md").write_text("\n".join(md) + "\n")
