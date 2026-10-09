@@ -57,10 +57,12 @@ local function define_highlights()
     DbblissError = 'ErrorMsg',
     DbblissWarn = 'WarningMsg',
     DbblissPaused = 'MoreMsg',
+    DbblissTx = 'WarningMsg',
   }
   for name, link in pairs(links) do
     vim.api.nvim_set_hl(0, name, { link = link, default = true })
   end
+  vim.api.nvim_set_hl(0, 'DbblissProd', { fg = '#ffffff', bg = '#c0392b', bold = true, default = true })
 end
 
 -- Buffers --------------------------------------------------------------------------------------

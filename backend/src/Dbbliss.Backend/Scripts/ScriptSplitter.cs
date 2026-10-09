@@ -38,8 +38,21 @@ public static class ScriptSplitter
         return lexer.Units;
     }
 
+    /// <summary>
+    /// The words of <paramref name="text"/> outside strings, comments, quoted identifiers and dollar
+    /// quotes, in order (as written, not lower-cased). Used to classify statements.
+    /// </summary>
+    public static IReadOnlyList<string> Words(string text, ScriptDialect dialect)
+    {
+        var lexer = new Lexer(text, dialect) { WordsOut = [] };
+        lexer.Run();
+        return lexer.WordsOut;
+    }
+
     private sealed class Lexer(string s, ScriptDialect dialect)
     {
+        public List<string>? WordsOut { get; init; }
+
         private readonly bool _go = dialect == ScriptDialect.GoBatches;
         private readonly List<int> _lineStarts = LineStarts(s);
         private int _i;
@@ -115,6 +128,7 @@ public static class ScriptSplitter
                     Content(start);
                     EndContent();
                     Track(word);
+                    WordsOut?.Add(word);
                 }
                 else
                 {

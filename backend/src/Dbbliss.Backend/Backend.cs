@@ -244,6 +244,7 @@ public sealed class Backend
                 ["start"] = new JsonObject { ["line"] = unit.Start.Line, ["col"] = unit.Start.Column },
                 ["end"] = new JsonObject { ["line"] = unit.End.Line, ["col"] = unit.End.Column },
                 ["repeat"] = unit.Repeat,
+                ["kind"] = StatementClassifier.Classify(unit.Text, engine.Dialect) == StatementKind.Read ? "read" : "write",
             });
         }
         return new JsonObject { ["statements"] = statements };

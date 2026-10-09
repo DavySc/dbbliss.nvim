@@ -30,9 +30,10 @@ package.loaded['dbbliss.backend'] = {
 local dbbliss = require('dbbliss')
 vim.notify = function() end
 -- Every rollback prompt is answered "Rollback".
+-- (stub.confirm_answer picks another choice: 2 is Cancel.)
 vim.fn.confirm = function()
   stub.confirms = stub.confirms + 1
-  return 1
+  return stub.confirm_answer or 1
 end
 
 local next_connection = 0
@@ -80,6 +81,7 @@ local function reset()
   stub.open = {}
   stub.server_tx = {}
   stub.confirms = 0
+  stub.confirm_answer = nil
   next_connection = 0
 end
 
@@ -310,6 +312,154 @@ local tests = {
       local text = table.concat(require('dbbliss.results').lines(), '\n')
       expect(not text:find(' 4', 1, true), 'a late row was appended to the table:\n' .. text)
       expect(text:find('3 more rows had already arrived', 1, true), 'the late rows were not reported:\n' .. text)
+    end,
+  },
+  {
+    -- Prod: statements that can change data are confirmed once, before anything runs.
+    'prod_confirms_writes_before_running',
+    '',
+    function()
+      dbbliss.setup({ connections = { a = { engine = 'postgres', connection_string = 'Host=x', env = 'prod' } } })
+      script_setup({ 'select 1;', 'delete from t;' })
+      stub.confirm_answer = 2
+      dbbliss.run('buffer')
+      local read = stmt('select 1;', 0)
+      read.kind = 'read'
+      local write = stmt('delete from t;', 1)
+      write.kind = 'write'
+      take('script/split').cb(nil, { statements = { read, write } })
+      expect(stub.confirms == 1, 'expected one prompt, got ' .. stub.confirms)
+      expect(take('execute') == nil, 'a statement ran although the prompt was cancelled')
+      expect(next(dbbliss._state.scripts) == nil, 'the script is still marked as running')
+
+      stub.confirm_answer = 1
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { read, write } })
+      expect(stub.confirms == 2, 'expected a second prompt')
+      expect(take('execute') ~= nil, 'nothing ran after the prompt was accepted')
+    end,
+  },
+  {
+    'prod_does_not_ask_for_reads_or_on_other_environments',
+    '',
+    function()
+      dbbliss.setup({
+        connections = {
+          a = { engine = 'postgres', connection_string = 'Host=x', env = 'prod' },
+          b = { engine = 'postgres', connection_string = 'Host=x', env = 'dev' },
+        },
+      })
+      script_setup({ 'select 1;' })
+      local read = stmt('select 1;', 0)
+      read.kind = 'read'
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { read } })
+      expect(stub.confirms == 0, 'asked about a read on prod')
+      expect(take('execute') ~= nil, 'the read did not run')
+      -- Unclassified counts as a write.
+      dbbliss._state.scripts = {}
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0) } })
+      expect(stub.confirms == 1, 'an unclassified statement was not asked about')
+    end,
+  },
+  {
+    'quit_with_open_transaction_asks_and_can_be_cancelled',
+    '',
+    function()
+      dbbliss.connect('a')
+      answer_all()
+      dbbliss._state.connections.a.transaction = 'active'
+      stub.confirm_answer = 2
+      dbbliss.on_exit_pre()
+      local guard = dbbliss._state.guard_buf
+      expect(stub.confirms == 1, 'no prompt')
+      expect(guard and vim.bo[guard].modified, 'Cancel left no modified buffer to stop the quit')
+      -- The real thing: :qa must fail while the guard is up.
+      local ok, err = pcall(vim.cmd, 'qa')
+      expect(not ok and tostring(err):find('E37', 1, true), 'qa was not stopped: ' .. tostring(err))
+      vim.wait(50, function()
+        return false
+      end)
+      expect(not vim.bo[guard].modified, 'the guard stayed modified, so quitting would stay blocked')
+      -- Accepting leaves the quit alone.
+      stub.confirm_answer = 1
+      dbbliss.on_exit_pre()
+      expect(not vim.bo[guard].modified, 'accepting still raised the guard')
+    end,
+  },
+  {
+    -- The report of a typed BEGIN is not here yet, so the client's view says "none" while the
+    -- server holds a transaction (spec/quint/client.qnt, QuitViewOnly).
+    'quit_while_a_query_runs_asks',
+    '',
+    function()
+      dbbliss.connect('a')
+      answer_all()
+      dbbliss._state.queries.q1 = { connection = 'a', rows = 0 }
+      dbbliss.on_exit_pre()
+      expect(stub.confirms == 1, 'no prompt while a query is running')
+    end,
+  },
+  {
+    'quit_while_a_transaction_call_is_in_flight_asks',
+    '',
+    function()
+      dbbliss.connect('a')
+      answer_all()
+      dbbliss.begin()
+      dbbliss.on_exit_pre()
+      expect(stub.confirms == 1, 'no prompt while begin is in flight')
+      local r = take('transaction/begin')
+      r.cb(nil, { transaction = 'active' })
+      stub.confirms = 0
+      dbbliss._state.connections.a.transaction = 'none'
+      dbbliss.on_exit_pre()
+      expect(stub.confirms == 0, 'still asking after the call came back')
+    end,
+  },
+  {
+    'quit_without_transaction_does_not_ask',
+    '',
+    function()
+      dbbliss.connect('a')
+      answer_all()
+      dbbliss.on_exit_pre()
+      expect(stub.confirms == 0, 'asked although nothing is open')
+    end,
+  },
+  {
+    'closing_a_buffer_with_an_open_transaction_asks',
+    '',
+    function()
+      local b = script_setup({ 'select 1;' })
+      vim.b[b].dbbliss_connection = 'a'
+      dbbliss._state.connections.a.transaction = 'active'
+      stub.confirm_answer = 2
+      local ok = pcall(vim.cmd, 'bwipeout! ' .. b)
+      expect(not ok and vim.api.nvim_buf_is_valid(b), 'the buffer was closed although Cancel was chosen')
+      stub.confirm_answer = 1
+      ok = pcall(vim.cmd, 'bwipeout! ' .. b)
+      expect(ok and not vim.api.nvim_buf_is_valid(b), 'the buffer was not closed after accepting')
+    end,
+  },
+  {
+    'statusline_shows_connection_env_transaction_and_running',
+    '',
+    function()
+      dbbliss.setup({ connections = { a = { engine = 'postgres', connection_string = 'Host=x', env = 'prod' } } })
+      expect(dbbliss.statusline(true) == '', 'not empty without a connection')
+      dbbliss.connect('a')
+      answer_all()
+      expect(dbbliss.statusline(true) == 'a  PROD ', 'idle: ' .. dbbliss.statusline(true))
+      dbbliss._state.connections.a.transaction = 'active'
+      expect(dbbliss.statusline(true) == 'a  PROD  TX', 'transaction: ' .. dbbliss.statusline(true))
+      dbbliss._state.connections.a.transaction = 'aborted'
+      dbbliss._state.queries.q1 = { connection = 'a', rows = 0 }
+      expect(dbbliss.statusline(true) == 'a  PROD  TX aborted ⏵ running', 'aborted and running: ' .. dbbliss.statusline(true))
+      dbbliss._state.queries.q1.paused = true
+      expect(dbbliss.statusline(true):find('⏸ paused', 1, true), 'paused')
+      expect(dbbliss.statusline():find('%#DbblissProd#', 1, true), 'prod is highlighted')
     end,
   },
   {

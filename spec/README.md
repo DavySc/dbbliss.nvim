@@ -46,6 +46,8 @@ The other variants are checked by random simulation, which finds their counterex
 | `NoServerTruth` | lease, Lua | `NoSilentRollback`, `HonestTxView` |
 | `LeaseBeforeWrite` | server truth, Lua | `HonestTxView` |
 | `LuaByName` | server truth, lease | `NoOrphanSession`, `HonestTxView` |
+| `QuitNoPrompt` | all three, but Neovim quits without asking | `NoSilentRollback` |
+| `QuitViewOnly` | all three, asks only when Lua's view shows a transaction | `NoSilentRollback` (a typed `BEGIN` whose report is still on its way) |
 
 What the counterexamples were in the code before the fixes. All three are fixed now, and each has
 tests that failed before the fix (see [Tests](#tests)):

@@ -18,7 +18,10 @@
  * Driver behaviour that is assumed rather than verified is marked ASSUMPTION. Each one is a test
  * to write against the real drivers before relying on a result that depends on it.
  *
- * Three constants select design fixes; see the variant modules at the end of the file.
+ * Quitting Neovim (Phase 1 M4): the backend's shutdown closes every connection, which rolls back
+ * whatever is open. Lua asks first (ExitPre), so a quit is only ever one the user agreed to.
+ *
+ * Five constants select design fixes; see the variant modules at the end of the file.
  * State is kept in many small variables: Apalache (used by `quint verify`, also for TLC) rejects
  * the model when large record types are repeated on every expression.
  */
@@ -33,6 +36,12 @@ module client {
   // Lua: refuse to connect a name that is connected or connecting, and apply callbacks only to
   // the connection they were made for (by id, not by name).
   const LuaById: bool
+
+  // Lua: quitting asks the user when its view shows an open transaction.
+  const AskOnQuit: bool
+  // Lua: ... and also when a query or transaction call is in flight, because its report is not
+  // here yet and the server may already hold a transaction Lua has not heard of.
+  const AskWhileRunning: bool
 
   const MaxActions: int
   const MaxConnects: int
@@ -94,6 +103,7 @@ module client {
   var toLua: List[Msg]         // backend stdout -> Neovim (one ordered writer)
   var silentRollback: bool     // a disconnect rolled back a transaction nobody asked about
   var budget: int              // user actions left
+  var quitLog: int             // 0: Neovim has not quit; 1: it quit with nothing open; 2: it quit and the user agreed to a rollback
 
   // ---------------------------------------------------------------------------------------------
   // Helpers
@@ -208,6 +218,7 @@ module client {
   // Frame helpers
 
   action keepLua = all {
+    quitLog' = quitLog,
     lconn' = lconn, lconnecting' = lconnecting, lqueries' = lqueries, lpending' = lpending,
     nextReq' = nextReq, nextQid' = nextQid, connects' = connects,
   }
@@ -237,7 +248,7 @@ module client {
     lconn' = NoConn, lconnecting' = false, lqueries' = Map(), lpending' = Map(),
     nextReq' = 1, nextQid' = 1, connects' = 0,
     conns' = Map(), runs' = Map(), txJobs' = Map(), discs' = Map(), nextConn' = 1,
-    srv' = Map(), toBe' = [], toLua' = [], silentRollback' = false, budget' = MaxActions,
+    srv' = Map(), toBe' = [], toLua' = [], silentRollback' = false, budget' = MaxActions, quitLog' = 0,
   }
 
   // ---------------------------------------------------------------------------------------------
@@ -251,7 +262,7 @@ module client {
     nextReq' = nextReq + 1,
     toBe' = toBe.append(r),
     budget' = budget - 1,
-    keepBe, srv' = srv, toLua' = toLua, silentRollback' = silentRollback,
+    keepBe, srv' = srv, toLua' = toLua, silentRollback' = silentRollback, quitLog' = quitLog,
   }
 
   // M.connect
@@ -295,13 +306,36 @@ module client {
     lconn' = lconn, lconnecting' = lconnecting, lqueries' = lqueries, nextQid' = nextQid, connects' = connects,
   }
 
+  // Quitting Neovim, once it goes ahead. Lua asks first when its view shows a transaction (or, with
+  // AskWhileRunning, when something is in flight); this action is the quit the user agreed to, or
+  // the one nothing made Lua ask about. The backend's shutdown closes every connection, so the
+  // world is gone afterwards. A transaction that was open and not asked about is a silent rollback.
+  action UQuit = {
+    val viewOpen = hasConn(lconn) and connTx(lconn) != "none"
+    val inflight = lqueries.keys().size() > 0 or
+      lpending.keys().exists(r => match lpending.get(r) { | CbTx(_) => true | _ => false })
+    val asked = AskOnQuit and (viewOpen or (AskWhileRunning and inflight))
+    val serverOpen = srv.keys().exists(c => srv.get(c) != TNone)
+    all {
+      budget > 0,
+      quitLog == 0,
+      lconn' = NoConn, lconnecting' = false, lqueries' = Map(), lpending' = Map(),
+      nextReq' = nextReq, nextQid' = nextQid, connects' = connects,
+      conns' = Map(), runs' = Map(), txJobs' = Map(), discs' = Map(), nextConn' = nextConn,
+      srv' = Map(), toBe' = [], toLua' = [],
+      silentRollback' = (silentRollback or (serverOpen and not(asked))),
+      budget' = budget - 1,
+      quitLog' = if (asked and serverOpen) 2 else 1,
+    }
+  }
+
   // ---------------------------------------------------------------------------------------------
   // Lua: one message from the backend, in order (vim.schedule keeps the order)
 
   action luaFrame = all {
     toLua' = toLua.tail(),
     keepBe, srv' = srv, toBe' = toBe, silentRollback' = silentRollback, budget' = budget,
-    nextReq' = nextReq, nextQid' = nextQid, connects' = connects,
+    nextReq' = nextReq, nextQid' = nextQid, connects' = connects, quitLog' = quitLog,
   }
 
   action LuaResp(r: { req: int, ok: bool, tx: str, conn: int }): bool = all {
@@ -538,6 +572,7 @@ module client {
     nondet op = Set(OpBegin, OpCommit, OpRollback).oneOf()
     UTx(op),
     UDisconnect,
+    UQuit,
     LuaRecv,
     BeRecv,
     nondet q = runs.keys().union(Set(0)).oneOf()
@@ -582,6 +617,8 @@ module client {
   val NeverActiveView = not(quiescent and connTx(lconn) == "active")
   val NeverAbortedView = not(quiescent and connTx(lconn) == "aborted")
   val NeverReconnected = not(quiescent and connId(lconn) == 2)
+  // Quitting with a transaction open, after the user was asked and agreed.
+  val NeverAskedQuitRollback = quitLog != 2
   val NeverTxRolledBackOnDisconnect = not(discs.keys().exists(r => discs.get(r).ready and discs.get(r).rollback
     and srv.keys().contains(discs.get(r).conn) and srv.get(discs.get(r).conn) != TNone))
 }
@@ -590,21 +627,30 @@ module client {
 // Variants. Each fix is needed: dropping any one of them from Proposed breaks a property.
 
 module Current {
-  import client(ServerTruth = false, LeaseAfterWrite = false, LuaById = false, MaxActions = 6, MaxConnects = 2).*
+  import client(ServerTruth = false, LeaseAfterWrite = false, LuaById = false, AskOnQuit = true, AskWhileRunning = true, MaxActions = 6, MaxConnects = 2).*
 }
 
 module Proposed {
-  import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = true, MaxActions = 6, MaxConnects = 2).*
+  import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = true, AskOnQuit = true, AskWhileRunning = true, MaxActions = 6, MaxConnects = 2).*
 }
 
 module NoServerTruth {
-  import client(ServerTruth = false, LeaseAfterWrite = true, LuaById = true, MaxActions = 6, MaxConnects = 2).*
+  import client(ServerTruth = false, LeaseAfterWrite = true, LuaById = true, AskOnQuit = true, AskWhileRunning = true, MaxActions = 6, MaxConnects = 2).*
 }
 
 module LeaseBeforeWrite {
-  import client(ServerTruth = true, LeaseAfterWrite = false, LuaById = true, MaxActions = 6, MaxConnects = 2).*
+  import client(ServerTruth = true, LeaseAfterWrite = false, LuaById = true, AskOnQuit = true, AskWhileRunning = true, MaxActions = 6, MaxConnects = 2).*
 }
 
 module LuaByName {
-  import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = false, MaxActions = 6, MaxConnects = 2).*
+  import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = false, AskOnQuit = true, AskWhileRunning = true, MaxActions = 6, MaxConnects = 2).*
+}
+
+// Quitting (M4). Both prompts are needed.
+module QuitNoPrompt {
+  import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = true, AskOnQuit = false, AskWhileRunning = false, MaxActions = 6, MaxConnects = 2).*
+}
+
+module QuitViewOnly {
+  import client(ServerTruth = true, LeaseAfterWrite = true, LuaById = true, AskOnQuit = true, AskWhileRunning = false, MaxActions = 6, MaxConnects = 2).*
 }

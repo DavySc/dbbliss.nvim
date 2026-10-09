@@ -54,7 +54,7 @@ else
   bad "quint Proposed: Safe should hold"; echo "$out" | grep -vi protobuf | tail -30
 fi
 rm -rf "$root/quint/_apalache-out"
-for w in NeverActiveView NeverAbortedView NeverReconnected NeverTxRolledBackOnDisconnect; do
+for w in NeverActiveView NeverAbortedView NeverReconnected NeverTxRolledBackOnDisconnect NeverAskedQuitRollback; do
   qrun Proposed "$w" violation   # reachability: the properties are not vacuous
 done
 qrun Current NoSilentRollback violation
@@ -64,6 +64,8 @@ qrun NoServerTruth NoSilentRollback violation
 qrun NoServerTruth HonestTxView violation
 qrun LeaseBeforeWrite HonestTxView violation
 qrun LuaByName NoOrphanSession violation
+qrun QuitNoPrompt NoSilentRollback violation
+qrun QuitViewOnly NoSilentRollback violation
 
 echo
 if [[ $failures == 0 ]]; then echo "all checks passed"; else echo "$failures check(s) failed"; exit 1; fi

@@ -44,6 +44,7 @@ local state = {
   seq = 0,
   --- connection id → true while a script (split, then its statements one by one) is running
   scripts = {},
+  guard_buf = nil, ---@type integer?
 }
 M._state = state
 
@@ -51,6 +52,13 @@ local diagnostics = vim.api.nvim_create_namespace('dbbliss')
 
 local function notify(msg, level)
   vim.notify('dbbliss: ' .. msg, level or vim.log.levels.INFO)
+end
+
+--- Redraws the statusline: connection, transaction and running state changed.
+local function refresh()
+  vim.schedule(function()
+    pcall(vim.cmd, 'redrawstatus!')
+  end)
 end
 
 --- Backend replies are matched to connections by backend id, never by name: a name can be
@@ -115,6 +123,7 @@ local function on_backend_exit(code, signal)
   state.connecting = {}
   state.current = nil
   state.backend = nil
+  refresh()
   if had or code ~= 0 then
     notify(('backend exited (code %d, signal %d); all connections are gone'):format(code, signal), vim.log.levels.ERROR)
   end
@@ -165,6 +174,7 @@ local function register_handlers(b)
     local q = state.queries[p.query_id]
     state.queries[p.query_id] = nil
     results.query_ended(p.query_id)
+    refresh()
     local line = ('-- %s in %d ms'):format(p.status, p.elapsed_ms)
     if p.cancel and p.cancel ~= vim.NIL then
       line = line .. (' (cancel acknowledged after %d ms)'):format(p.cancel.ack_ms)
@@ -274,6 +284,7 @@ function M.connect(name, cb)
         transaction = 'none',
       }
       state.current = name
+      refresh()
       notify(('connected to %s (%s, session %s)'):format(name, result.engine, result.server_session_id))
     end
     if cb then
@@ -324,6 +335,7 @@ function M.execute(sql, opts)
     result_sets = 0,
     on_done = opts.on_done,
   }
+  refresh()
   results.show()
   results.note({ '', ('-- %s on %s'):format(query_id, name) }, 'DbblissInfo')
   local window = opts.window
@@ -433,6 +445,35 @@ local function run_queue(name, conn_id, bufnr, queue)
   step(1)
 end
 
+--- On a prod connection, statements that can change data are confirmed first, all at once. The
+--- backend classifies them (script/split, `kind`); a statement it did not classify counts as a write.
+---@param name string
+---@param statements dbbliss.Statement[]
+---@return boolean
+local function confirm_writes(name, statements)
+  local cfg = state.config.connections[name]
+  if not cfg or cfg.env ~= 'prod' then
+    return true
+  end
+  local writes = vim.tbl_filter(function(st)
+    return st.kind ~= 'read'
+  end, statements)
+  if #writes == 0 then
+    return true
+  end
+  local lines = {}
+  for i, st in ipairs(writes) do
+    if i > 5 then
+      lines[#lines + 1] = ('  ... and %d more'):format(#writes - 5)
+      break
+    end
+    local first = (st.text:gsub('%s+', ' '))
+    lines[#lines + 1] = ('  line %d: %s'):format(st.start.line + 1, #first > 70 and first:sub(1, 67) .. '...' or first)
+  end
+  local msg = ('PROD %s: %d of %d statement(s) can change data:\n%s\nRun?'):format(name, #writes, #statements, table.concat(lines, '\n'))
+  return vim.fn.confirm(msg, '&Run\n&Cancel', 2) == 1
+end
+
 --- Splits the text of `scope` (the backend does it) and hands the statements over. The connection is
 --- marked busy with a script from here until `release` is called, which `cb` must arrange.
 ---@param scope 'statement'|'buffer'|'range'
@@ -471,6 +512,12 @@ local function with_statements(scope, range, cb)
     if #statements == 0 then
       state.scripts[conn_id] = nil
       notify('nothing to run')
+      return
+    end
+    vim.b[bufnr].dbbliss_connection = name
+    if not confirm_writes(name, statements) then
+      state.scripts[conn_id] = nil
+      notify('cancelled: nothing was run on ' .. name)
       return
     end
     cb(name, conn_id, bufnr, statements, first - 1)
@@ -567,7 +614,9 @@ local function transaction(method)
     return
   end
   local id = conn.id
+  conn.tx_calls = (conn.tx_calls or 0) + 1
   state.backend:request('transaction/' .. method, { connection_id = id }, function(err, result)
+    conn.tx_calls = conn.tx_calls - 1
     if err then
       notify(method .. ' failed: ' .. err.message, vim.log.levels.ERROR)
       return
@@ -575,6 +624,7 @@ local function transaction(method)
     local name, c = connection_by_id(id)
     if c then
       c.transaction = result.transaction
+      refresh()
       notify(('%s on %s: transaction %s'):format(method, name, result.transaction))
     end
   end)
@@ -619,6 +669,7 @@ function M.disconnect()
           state.current = nil
         end
       end
+      refresh()
       notify('disconnected from ' .. name)
     end)
   end
@@ -658,6 +709,108 @@ function M.on_exit()
       io.stderr:write('dbbliss: backend did not shut down in time\n')
     end
   end
+end
+
+-- Guards: quitting, closing a buffer ----------------------------------------------------------
+
+---@return string[]  what quitting would roll back or cancel, per connection
+local function open_transactions()
+  local list = {}
+  for name, c in pairs(state.connections) do
+    if c.transaction and c.transaction ~= 'none' then
+      list[#list + 1] = ('%s (transaction %s)'):format(name, c.transaction)
+    else
+      -- Something in flight whose report has not arrived: the server may already hold a transaction
+      -- this client has not heard of (spec/quint/client.qnt, QuitViewOnly).
+      local busy = (c.tx_calls or 0) > 0
+      for _, q in pairs(state.queries) do
+        busy = busy or q.connection == name
+      end
+      if busy then
+        list[#list + 1] = ('%s (a query or transaction call is running)'):format(name)
+      end
+    end
+  end
+  table.sort(list)
+  return list
+end
+
+--- ExitPre: Neovim is about to quit, and quitting closes every connection, which rolls back what
+--- is open. Ask first. An autocmd cannot cancel a quit, but a modified buffer does (E37), so
+--- "Cancel" leaves one modified for the moment it takes the quit to fail.
+function M.on_exit_pre()
+  local open = open_transactions()
+  if #open == 0 then
+    return
+  end
+  local msg = ('Quitting cancels running queries and rolls back open transactions:\n  %s'):format(table.concat(open, '\n  '))
+  if vim.fn.confirm(msg, '&Quit and roll back\n&Cancel', 2) == 1 then
+    return
+  end
+  if not (state.guard_buf and vim.api.nvim_buf_is_valid(state.guard_buf)) then
+    state.guard_buf = vim.api.nvim_create_buf(false, false)
+    vim.bo[state.guard_buf].bufhidden = 'hide'
+  end
+  local guard = state.guard_buf
+  vim.bo[guard].modified = true
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(guard) then
+      vim.bo[guard].modified = false
+    end
+    notify('quit cancelled: ' .. table.concat(open, ', ') .. '; finish or cancel first', vim.log.levels.WARN)
+  end)
+end
+
+--- BufDelete/BufWipeout: closing a buffer that ran statements on a connection with an open
+--- transaction. The transaction is not the buffer's and stays open; the prompt is so that the
+--- statements that opened it are not closed out of sight by accident. Raising an error cancels the close.
+---@param bufnr integer
+function M.on_buf_close(bufnr)
+  local name = vim.b[bufnr].dbbliss_connection
+  local conn = name and state.connections[name]
+  if not conn or conn.transaction == 'none' then
+    return
+  end
+  local msg = ('This buffer ran statements on %s, which has an open transaction (%s).\nClosing the buffer does not end it.'):format(
+    name,
+    conn.transaction
+  )
+  if vim.fn.confirm(msg, '&Close buffer\n&Cancel', 2) ~= 1 then
+    error('dbbliss: buffer not closed: transaction open on ' .. name, 0)
+  end
+end
+
+-- Statusline -----------------------------------------------------------------------------------
+
+--- Connection, environment, transaction and running state for the current connection.
+---@param plain boolean?  true: no statusline highlight escapes
+---@return string
+function M.statusline(plain)
+  local name = state.current
+  local conn = name and state.connections[name]
+  if not conn then
+    return ''
+  end
+  local cfg = state.config.connections[name] or {}
+  local function hl(group, text)
+    return plain and text or ('%%#%s#%s%%*'):format(group, text)
+  end
+  local parts = { name }
+  if cfg.env then
+    parts[#parts + 1] = cfg.env == 'prod' and hl('DbblissProd', ' PROD ') or ('[' .. cfg.env .. ']')
+  end
+  if conn.transaction == 'aborted' then
+    parts[#parts + 1] = hl('DbblissTx', 'TX aborted')
+  elseif conn.transaction ~= 'none' then
+    parts[#parts + 1] = hl('DbblissTx', 'TX')
+  end
+  for _, q in pairs(state.queries) do
+    if q.connection == name then
+      parts[#parts + 1] = q.paused and '⏸ paused' or '⏵ running'
+      break
+    end
+  end
+  return table.concat(parts, ' ')
 end
 
 -- :Dbbliss command ----------------------------------------------------------------------------

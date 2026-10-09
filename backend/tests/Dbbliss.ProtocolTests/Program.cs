@@ -25,6 +25,7 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("instances_dead_ids", "", InstancesDeadIds),
     ("instances_prune", "", InstancesPrune),
     ("splitter_cases", "", () => { SplitterCases.Run(); return Task.CompletedTask; }),
+    ("classifier_cases", "", () => { ClassifierCases.Run(); return Task.CompletedTask; }),
     ("script_split_rpc", "", ScriptSplitRpc),
     ("error_line_in_buffer", "", ErrorLineInBuffer),
     ("paging_pauses_and_fetch_resumes", "", PagingPausesAndFetchResumes),
@@ -234,7 +235,8 @@ static async Task ScriptSplitRpc()
     if (second["text"]!.GetValue<string>() != "select 2;"
         || second["start"]!["line"]!.GetValue<int>() != 1 || second["start"]!["col"]!.GetValue<int>() != 2
         || second["end"]!["line"]!.GetValue<int>() != 1 || second["end"]!["col"]!.GetValue<int>() != 11
-        || second["repeat"]!.GetValue<int>() != 1)
+        || second["repeat"]!.GetValue<int>() != 1
+        || second["kind"]!.GetValue<string>() != "read")
     {
         throw new TestFailure($"second statement is wrong: {second.ToJsonString()}");
     }
