@@ -377,9 +377,19 @@ public sealed class SqlServerCatalog : ICatalog
 
     // Scripting -----------------------------------------------------------------------------------
 
+    /// <summary>
+    /// The script starts with USE [database], as SSMS's does: the objects are in the database named
+    /// in the request, which is rarely the one the script is run in.
+    /// </summary>
     public async Task<string> ScriptAsync(IEngineSession s, ObjectRequest req, CancellationToken ct)
     {
         var t = await ResolveAsync(s, req, ct);
+        var body = await ScriptBodyAsync(s, t, ct);
+        return t.Database is null ? body : $"USE {ObjectNames.QuoteBracket(t.Database)}\nGO\n{body}";
+    }
+
+    private async Task<string> ScriptBodyAsync(IEngineSession s, Target t, CancellationToken ct)
+    {
         var id = new Dictionary<string, object?> { ["id"] = (int)t.Id };
         if (t.Kind is "view" or "procedure" or "function" or "trigger")
         {

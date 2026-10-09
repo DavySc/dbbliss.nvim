@@ -268,7 +268,14 @@ local steps = {
       wait('the script buffer', function()
         return #vim.api.nvim_list_bufs() > before
       end)
-      local first = vim.api.nvim_buf_get_lines(0, 0, 1, false)[1]
+      -- SQL Server scripts start with USE [db] and GO
+      local first
+      for _, l in ipairs(vim.api.nvim_buf_get_lines(0, 0, 6, false)) do
+        if not l:upper():match('^USE ') and l:upper() ~= 'GO' then
+          first = l
+          break
+        end
+      end
       expect(first:upper():find('CREATE TABLE', 1, true), 'the script does not start with CREATE TABLE: ' .. tostring(first))
       expect(vim.bo.filetype == 'sql', 'the script buffer is not SQL')
     end,
