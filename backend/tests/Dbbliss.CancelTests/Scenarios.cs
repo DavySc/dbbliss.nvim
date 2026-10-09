@@ -67,8 +67,6 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
         }
         // Verifies: LLR-PG-1
         if (profile.Engine == "postgres") yield return ("pg_session_settings", PgSessionSettings);
-        // Verifies: HLR-TX-3, HLR-TX-2
-        if (profile.Engine == "sqlserver") yield return ("sqlserver_uncommittable_transaction", SqlServerUncommittable);
         // Verifies: HLR-LIFE-1, HLR-TX-4
         yield return ("backend_stdin_closed", () => BackendDeath("backend_stdin_closed", c => { c.CloseStdin(); return Task.CompletedTask; }));
         // Verifies: HLR-LIFE-1

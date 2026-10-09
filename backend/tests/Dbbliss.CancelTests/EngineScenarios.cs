@@ -126,29 +126,4 @@ public sealed partial class Scenarios
         }
         return Result("pg_session_settings", ok() ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
     }
-
-    /// <summary>An error inside a TRY with XACT_ABORT ON (a runtime one: a constant 1/0 would fail at compile time, before the transaction starts) dooms the transaction (XACT_STATE -1): it is reported as aborted, refuses commit, and rolls back.</summary>
-    private async Task<ScenarioResult> SqlServerUncommittable()
-    {
-        var (steps, step, ok) = Steps();
-        var (c, conn, _) = await StartAsync();
-        await using var _c = c;
-        await Execute(c, conn, "doom", "SET XACT_ABORT ON; BEGIN TRANSACTION; BEGIN TRY THROW 50000, 'doomed', 1; END TRY BEGIN CATCH SELECT XACT_STATE() AS state; END CATCH");
-        var done = (await c.WaitDoneAsync("doom", DoneTimeoutMs))["params"]!;
-        step($"after the failed statement: {done["transaction"]}", done["transaction"]?.GetValue<string>() == "aborted");
-        string? message = null;
-        try
-        {
-            await c.RequestAsync("transaction/commit", new JsonObject { ["connection_id"] = conn });
-        }
-        catch (BackendErrorException ex)
-        {
-            message = ex.Message;
-        }
-        step($"commit: {message}", message is not null && message.Contains("uncommittable", StringComparison.Ordinal));
-        await c.RequestAsync("transaction/rollback", new JsonObject { ["connection_id"] = conn });
-        var status = await c.RequestAsync("transaction/status", new JsonObject { ["connection_id"] = conn });
-        step($"after rollback: {status["transaction"]}", status["transaction"]?.GetValue<string>() == "none");
-        return Result("sqlserver_uncommittable_transaction", ok() ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
-    }
 }

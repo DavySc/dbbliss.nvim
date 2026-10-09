@@ -74,6 +74,21 @@
    "kind": "line",
    "category": "platform",
    "reason": "A PostgreSQL server on Windows rejects any non-zero client_connection_check_interval. The Windows CI job takes this path (its backend_killed scenario reports it) but is not instrumented; on Linux the server accepts the value."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs",
+   "match": "-1 => TransactionState.Aborted,",
+   "kind": "both",
+   "category": "unreachable",
+   "reason": "XACT_STATE() = -1 (an uncommittable transaction). SQL Server rolls such a transaction back at the end of the batch (error 3998), and the state is read between batches, so it is never -1 when read. Tried: a THROW under XACT_ABORT ON inside TRY dooms the transaction, and the next probe still sees none. The arm stays so a future server that keeps the transaction is reported as aborted, not active."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs",
+   "match": "case TransactionState.Aborted:",
+   "after": 1,
+   "kind": "both",
+   "category": "unreachable",
+   "reason": "The commit refusal for an aborted transaction follows from the state above, which SQL Server never reports between batches (see XACT_STATE -1). PostgreSQL has the same refusal and it is tested there (tx_aborted_commit_refused)."
   }
  ]
 }
