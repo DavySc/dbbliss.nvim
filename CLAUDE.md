@@ -65,6 +65,19 @@ part without downloading `tla2tools.jar`, point `TLA_JAR` at Apalache's jar
   runs the database-free Lua suites on exactly v0.10.0. The Neovim in apt is 0.9.5: for local runs
   use the release tarball (`nvim-linux64.tar.gz` from github.com/neovim/neovim, v0.10.0).
 
+## Assurance (Level B-like, see `docs/assurance/plan.md`)
+
+- New behaviour = a requirement in `docs/assurance/requirements.md` (new ID) + a test tagged
+  `Verifies: <ID>` in the same commit. `python3 scripts/assurance/trace.py --check` must stay clean;
+  it also regenerates `traceability.md` (run it without `--check`).
+- A defect fix gets an entry in `docs/assurance/problem-reports.md` and a test that failed first.
+- Critical backend files (`coverage-policy.json`) need every uncovered line or branch tested,
+  removed, or justified in `coverage-justifications.json` (named by a snippet of code, with a
+  category and a reason). CI job `assurance` enforces it; `scripts/assurance/dotnet-coverage.sh`
+  and `lua-coverage.sh` reproduce it on Linux (needs `dotnet-coverage`, luacov is fetched).
+- Show a new test can fail: break the code once and watch it fail, as the commits describe.
+- The review checklist is `docs/assurance/reviews/review-checklist.md`.
+
 ## Commands
 
 `dotnet` lives in `~/.dotnet` (not on PATH by default): `export PATH=$HOME/.dotnet:$PATH`.

@@ -59,8 +59,8 @@ Table numbers refer to DO-178C Annex A.
 | A-6 Tests are requirements-based and robust | met for the catalog, partly overall | every test is tagged to a requirement; normal-range and robustness cases exist (`FailureCases`, `RobustnessCases`, `UnitCases`); see "Known gaps" |
 | A-7 Verification of the verification: test procedures correct | partly | new tests are mutation-checked by hand (the code is broken and the test must fail); this is **not automated** |
 | A-7 Requirements coverage | met | `trace.py --check` fails CI for an untested requirement or an untagged test |
-| A-7 Structural coverage (Level B: decision) | partly | C# statement and branch coverage, merged over suites, gated for critical files; **Lua statement coverage only**; platform-specific code unmeasured |
-| A-7 Unreached code is justified or removed | partly | every uncovered item in a critical file needs an entry in `coverage-justifications.json`; non-critical files are only ratcheted |
+| A-7 Structural coverage (Level B: decision) | partly | C# statement and branch coverage, merged over suites, gated for the critical backend files (17 justified exceptions at the last measured commit, listed with reasons); **Lua statement coverage only**; platform-specific code unmeasured |
+| A-7 Unreached code is justified or removed | partly | every uncovered item in a critical file is covered by a test, removed, or has an entry in `coverage-justifications.json` with a category; non-critical files (catalog queries, Lua, `Program.cs`) are only ratcheted |
 | A-8 Configuration management | partly | git + CI; **no baseline tags yet**; no access control beyond GitHub |
 | A-9 Quality assurance | partly | PR checklist; **no independent QA role** |
 | A-10 Certification liaison | n/a | no authority |
@@ -101,6 +101,41 @@ process, and the cancel suite starts it from its build output (`scripts/assuranc
    not required at Level B and is not measured.
 5. Merging suites takes the larger covered count per line over all suites: a lower bound of the
    union. The report can understate coverage; it cannot overstate it.
+
+## Evidence at the last measured commit
+
+From the `assurance` job of CI run 37983708031 (Linux, PostgreSQL 17 and SQL Server 2022 in Docker),
+before the final simplification of the SQL Server application-name check. The generated
+`coverage/summary.md` of the latest run is the current record; these numbers date.
+
+| Critical file | Statements | Decisions |
+|---|---|---|
+| `Backend.cs` | 99.3% | 99.6% |
+| `Rpc/ResultStreamer.cs`, `Rpc/Output.cs`, `Rpc/CsvExport.cs`, `Engines/QueryControl.cs`, `Engines/ValueConverter.cs`, `Scripts/ScriptSplitter.cs`, `Scripts/StatementClassifier.cs`, `Catalog/ObjectNames.cs` | 100% | 100% |
+| `Engines/SqlServerEngine.cs` | 97.0% | 93.6% |
+| `Engines/PostgresEngine.cs` | 87.3% | 83.3% |
+| `Instances.cs` | 88.4% | 100% |
+| `Credentials.cs` | 81.4% | 86.2% |
+
+What is left uncovered in those files is either a compiler artifact (a closing brace, a rethrow), or
+justified: **7 defensive** (handlers for failures that cannot be provoked, not tested), **3
+platform** (Windows-only code, run by the Windows job without instrumentation) and **7
+unreachable** (branches that cannot be taken, each with the reason). The `defensive` entries are
+the weakest evidence in this plan: they are code that was reviewed, not executed.
+
+Not in the gate (ratchet only): the catalog queries (`PostgresCatalog` 86% / 63%,
+`SqlServerCatalog` 94% / 73%), `Program.cs`, `Log.cs`, and the Lua files (`init.lua` 82%,
+`backend.lua` 75%, `results.lua` 89%, the rest above 92%).
+
+### What this process found
+
+Seven product defects were found and fixed while building this evidence, none by the suites that
+existed before (`problem-reports.md`: PR-014, PR-015, PR-019 to PR-023): `disconnect` waiting on a
+busy connection, a Neovim older than 0.10 failing with a cryptic error, a failed shutdown close
+logged as success, PostgreSQL arrays shown as `System.Int32[]`, an `export` without a path
+ignored, a negative check interval ignored, and a SQL Server error outside a statement reporting
+line 0. That is the argument for the practice, and also a measure of how much was
+unverified before.
 
 ## Independence
 

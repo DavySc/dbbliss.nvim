@@ -156,6 +156,9 @@ Backend diagnostics go to `stdpath('log')/dbbliss-backend.log`.
 
 ## Tests
 
+How the tests are organised, what they cover, and what they do not: [docs/assurance/plan.md](docs/assurance/plan.md).
+Every requirement and the tests that verify it: [docs/assurance/traceability.md](docs/assurance/traceability.md).
+
 ```sh
 docker compose up -d --wait
 scripts/build.sh
