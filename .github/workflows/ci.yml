@@ -63,7 +63,7 @@ jobs:
         shell: pwsh
         run: scripts/build.ps1 -Rid win-x64
 
-      - name: Credential stores (Linux: a pass store with a throwaway key)
+      - name: "Credential stores (Linux: a pass store with a throwaway key)"
         if: runner.os == 'Linux'
         shell: bash
         run: |
@@ -78,12 +78,12 @@ jobs:
           echo "DBBLISS_TEST_PASS=1" >> "$GITHUB_ENV"
           echo "DBBLISS_E2E_PASS=dbbliss/pg" >> "$GITHUB_ENV"
 
-      - name: Credential stores (Windows: Credential Manager)
+      - name: "Credential stores (Windows: Credential Manager)"
         if: runner.os == 'Windows'
-        shell: bash
+        shell: pwsh
         run: |
-          cmdkey "/generic:dbbliss-e2e" "/user:postgres" "/pass:root"
-          echo "DBBLISS_E2E_CREDMAN=dbbliss-e2e" >> "$GITHUB_ENV"
+          cmdkey /generic:dbbliss-e2e /user:postgres /pass:root
+          "DBBLISS_E2E_CREDMAN=dbbliss-e2e" >> $env:GITHUB_ENV
 
       - name: Protocol tests (fake engine)
         shell: bash
