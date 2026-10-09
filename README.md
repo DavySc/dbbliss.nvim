@@ -76,6 +76,14 @@ Leave `password` out for integrated authentication (`Integrated Security=true` i
 string): SSPI on Windows, a Kerberos ticket (`kinit`) on Linux. `env = 'prod'` on a connection makes
 every statement that can change data ask for confirmation first.
 
+SQL Server sessions start with `SET ARITHABORT ON`, as in SSMS. Microsoft.Data.SqlClient leaves it
+off, which gives a query a different plan cache entry than in SSMS. Override or add SET options per
+connection (names and values are checked; only plain `SET NAME value` forms):
+
+```lua
+options = { mssql_set_options = { ARITHABORT = 'OFF', DEADLOCK_PRIORITY = 'LOW' } },
+```
+
 ## Use
 
 | Command | |
