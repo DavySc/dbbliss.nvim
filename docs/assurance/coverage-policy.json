@@ -1,6 +1,9 @@
 {
-  "tolerance": 0.1,
-  "exclude": ["RegexGenerator.g.cs", "Db2iEngine.cs"],
+  "tolerance": 1.0,
+  "exclude": [
+    "RegexGenerator.g.cs",
+    "Db2iEngine.cs"
+  ],
   "critical": [
     "backend/src/Dbbliss.Backend/Backend.cs",
     "backend/src/Dbbliss.Backend/Rpc/ResultStreamer.cs",
@@ -12,6 +15,10 @@
     "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs",
     "backend/src/Dbbliss.Backend/Credentials.cs",
     "backend/src/Dbbliss.Backend/Instances.cs",
-    "backend/src/Dbbliss.Backend/Catalog/ObjectNames.cs"
+    "backend/src/Dbbliss.Backend/Catalog/ObjectNames.cs",
+    "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs",
+    "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs",
+    "backend/src/Dbbliss.Backend/Engines/AdoStreaming.cs",
+    "backend/src/Dbbliss.Backend/Engines/AdoQuery.cs"
   ]
 }

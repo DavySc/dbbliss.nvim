@@ -74,7 +74,7 @@ public static class ValueConverter
     private static JsonObject MapToJson(IDictionary map)
     {
         var result = new JsonObject();
-        foreach (DictionaryEntry entry in map) result[System.Convert.ToString(entry.Key, CultureInfo.InvariantCulture) ?? ""] = Element(entry.Value);
+        foreach (DictionaryEntry entry in map) result[System.Convert.ToString(entry.Key, CultureInfo.InvariantCulture)!] = Element(entry.Value);
         return result;
     }
 

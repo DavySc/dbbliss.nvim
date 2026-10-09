@@ -79,6 +79,8 @@ public static class ValueCases
         Text("[\"0x01FF\"]", new[] { new byte[] { 1, 255 } }.Select(b => (object)b).ToArray());
         Text("{\"a\":\"1\",\"b\":null,\"c\":[1,2]}", new Dictionary<string, object?> { ["a"] = "1", ["b"] = null, ["c"] = new[] { 1, 2 } });
         Text("101", new System.Collections.BitArray(new[] { true, false, true }));
+        Text("[{\"a\":1},{\"b\":{\"c\":2}}]", new object[] { new Dictionary<string, int> { ["a"] = 1 }, new Dictionary<string, object> { ["b"] = new Dictionary<string, int> { ["c"] = 2 } } });
+        Text("{\"1\":\"x\"}", new Dictionary<int, string> { [1] = "x" }); // keys are text
         Text("opaque-text", new Opaque());
 
         // A whole row from a driver: NULL and DBNull become JSON null, the rest is converted.

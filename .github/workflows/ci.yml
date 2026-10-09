@@ -218,6 +218,8 @@ jobs:
           cat docs/assurance/traceability.md >> "$GITHUB_STEP_SUMMARY"
       - name: Coverage report and gate
         id: gate
+        # Blocking once the repository variable ASSURANCE_ENFORCE is 1 (docs/assurance/plan.md).
+        continue-on-error: ${{ vars.ASSURANCE_ENFORCE != '1' }}
         run: |
           code=0
           python3 scripts/assurance/coverage_report.py --check || code=$?

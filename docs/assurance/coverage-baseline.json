@@ -1,0 +1,118 @@
+{
+ "backend/src/Dbbliss.Backend/Backend.cs": {
+  "branches": 99.55,
+  "lines": 99.32
+ },
+ "backend/src/Dbbliss.Backend/Catalog/CatalogHelpers.cs": {
+  "branches": 70.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Catalog/CatalogModels.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Catalog/ObjectNames.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Catalog/PostgresCatalog.cs": {
+  "branches": 62.92,
+  "lines": 86.42
+ },
+ "backend/src/Dbbliss.Backend/Catalog/SqlServerCatalog.cs": {
+  "branches": 73.26,
+  "lines": 94.44
+ },
+ "backend/src/Dbbliss.Backend/Credentials.cs": {
+  "branches": 86.21,
+  "lines": 81.37
+ },
+ "backend/src/Dbbliss.Backend/Engines/AdoQuery.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Engines/AdoStreaming.cs": {
+  "branches": 25.0,
+  "lines": 50.0
+ },
+ "backend/src/Dbbliss.Backend/Engines/IEngine.cs": {
+  "branches": 0.0,
+  "lines": 54.55
+ },
+ "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs": {
+  "branches": 72.73,
+  "lines": 81.88
+ },
+ "backend/src/Dbbliss.Backend/Engines/QueryControl.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs": {
+  "branches": 85.71,
+  "lines": 95.74
+ },
+ "backend/src/Dbbliss.Backend/Engines/ValueConverter.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Instances.cs": {
+  "branches": 100.0,
+  "lines": 88.37
+ },
+ "backend/src/Dbbliss.Backend/Log.cs": {
+  "branches": 100.0,
+  "lines": 81.25
+ },
+ "backend/src/Dbbliss.Backend/Program.cs": {
+  "branches": 87.5,
+  "lines": 81.25
+ },
+ "backend/src/Dbbliss.Backend/Rpc/CsvExport.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Rpc/Output.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Rpc/ResultStreamer.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Rpc/RpcErrors.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Scripts/ScriptSplitter.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "lua/dbbliss/backend.lua": {
+  "lines": 75.49
+ },
+ "lua/dbbliss/info.lua": {
+  "lines": 97.44
+ },
+ "lua/dbbliss/init.lua": {
+  "lines": 82.47
+ },
+ "lua/dbbliss/names.lua": {
+  "lines": 97.06
+ },
+ "lua/dbbliss/render.lua": {
+  "lines": 97.4
+ },
+ "lua/dbbliss/results.lua": {
+  "lines": 89.43
+ },
+ "lua/dbbliss/script.lua": {
+  "lines": 100.0
+ },
+ "lua/dbbliss/tree.lua": {
+  "lines": 92.31
+ }
+}
