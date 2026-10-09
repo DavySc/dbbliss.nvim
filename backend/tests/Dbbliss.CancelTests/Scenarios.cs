@@ -42,6 +42,7 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
             yield return ("tx_typed_commit_after_api_begin", TypedCommitAfterApiBegin);
             yield return ("tx_aborted_commit_refused", AbortedCommitRefused);
         }
+        if (profile is SqlServerProfile mssql) yield return ("sqlserver_set_options", () => SetOptions(mssql));
         yield return ("backend_stdin_closed", () => BackendDeath("backend_stdin_closed", c => { c.CloseStdin(); return Task.CompletedTask; }));
         yield return ("backend_sigterm", BackendSigterm);
         yield return ("backend_killed", () => BackendDeath("backend_killed", c => { c.Kill(); return Task.CompletedTask; }));
@@ -417,6 +418,55 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
     /// spec/quint/client.qnt, bug 1: a BEGIN typed as SQL must be reported, must block a plain
     /// disconnect, and the API rollback must end it.
     /// </summary>
+    /// <summary>New SQL Server sessions get SSMS's ARITHABORT ON; <c>mssql_set_options</c> overrides and extends it.</summary>
+    private async Task<ScenarioResult> SetOptions(SqlServerProfile mssql)
+    {
+        const string name = "sqlserver_set_options";
+        await using var observer = await mssql.OpenObserverAsync();
+        var steps = new List<string>();
+        var ok = true;
+
+        async Task Check(string what, JsonObject? options, bool arithAbort, int deadlockPriority)
+        {
+            var (c, _, session) = await StartAsync(options);
+            await using var __ = c;
+            var got = await mssql.SessionSettingsAsync(observer, session);
+            var good = got == (arithAbort, deadlockPriority);
+            steps.Add($"{what}: arithabort={got.ArithAbort} deadlock_priority={got.DeadlockPriority}" + (good ? "" : " (WRONG)"));
+            ok &= good;
+        }
+
+        await Check("default", null, arithAbort: true, deadlockPriority: 0);
+        await Check("ARITHABORT off", new JsonObject { ["mssql_set_options"] = new JsonObject { ["arithabort"] = "OFF" } }, false, 0);
+        await Check("extra option", new JsonObject { ["mssql_set_options"] = new JsonObject { ["DEADLOCK_PRIORITY"] = "LOW" } }, true, -5);
+
+        try
+        {
+            var (c, _, _) = await StartAsync(new JsonObject { ["mssql_set_options"] = new JsonObject { ["ARITHABORT"] = "ON; DROP TABLE x" } });
+            await c.DisposeAsync();
+            steps.Add("injection: connected (WRONG)");
+            ok = false;
+        }
+        catch (BackendErrorException)
+        {
+            steps.Add("injection: refused");
+        }
+
+        // Well-formed but unknown to the server: the connect must fail, not carry on without it.
+        try
+        {
+            var (c, _, _) = await StartAsync(new JsonObject { ["mssql_set_options"] = new JsonObject { ["NOT_A_SET_OPTION"] = "ON" } });
+            await c.DisposeAsync();
+            steps.Add("unknown option: connected (WRONG)");
+            ok = false;
+        }
+        catch (BackendErrorException)
+        {
+            steps.Add("unknown option: refused by the server");
+        }
+        return Result(name, ok ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
+    }
+
     private async Task<ScenarioResult> TypedBegin()
     {
         const string name = "tx_typed_begin";

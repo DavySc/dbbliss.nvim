@@ -281,6 +281,16 @@ public sealed class SqlServerProfile : EngineProfile
 
     public override string CreateProbeTableSql(string t) => $"CREATE TABLE {t} (id int)";
     public override string DropProbeTableSql(string t) => $"DROP TABLE IF EXISTS {t}";
+
+    /// <summary>The session's ARITHABORT and DEADLOCK_PRIORITY as the server reports them.</summary>
+    public async Task<(bool ArithAbort, int DeadlockPriority)> SessionSettingsAsync(DbConnection observer, string spid)
+    {
+        var (has, v) = await FirstRowAsync(observer,
+            "SELECT arithabort, deadlock_priority FROM sys.dm_exec_sessions WHERE session_id = @spid",
+            ("@spid", short.Parse(spid, System.Globalization.CultureInfo.InvariantCulture)));
+        if (!has) throw new InvalidOperationException("session gone");
+        return (Convert.ToBoolean(v[0], System.Globalization.CultureInfo.InvariantCulture), Convert.ToInt32(v[1], System.Globalization.CultureInfo.InvariantCulture));
+    }
 }
 
 /// <summary>
