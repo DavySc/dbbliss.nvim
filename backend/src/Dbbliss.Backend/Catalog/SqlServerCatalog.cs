@@ -197,7 +197,7 @@ public sealed class SqlServerCatalog : ICatalog
             sections.Add(Table("Columns", await RunFirst(s, t.Database, $"""
                 SELECT c.column_id AS [#], c.name, {TypeSql("ty", "c")} AS type, c.is_nullable AS nullable,
                        dc.definition AS [default],
-                       CASE WHEN c.is_identity = 1 THEN 'identity(' + CAST(ic.seed_value AS varchar(30)) + ',' + CAST(ic.increment_value AS varchar(30)) + ')' END AS identity,
+                       CASE WHEN c.is_identity = 1 THEN 'identity(' + CAST(ic.seed_value AS varchar(30)) + ',' + CAST(ic.increment_value AS varchar(30)) + ')' END AS [identity],
                        CASE WHEN c.is_computed = 1 THEN cc.definition + CASE WHEN cc.is_persisted = 1 THEN ' (persisted)' ELSE '' END END AS computed
                 FROM sys.columns c
                 JOIN sys.types ty ON ty.user_type_id = c.user_type_id
@@ -223,7 +223,7 @@ public sealed class SqlServerCatalog : ICatalog
         else if (t.Kind is "procedure" or "function")
         {
             sections.Add(Table("Parameters", await RunFirst(s, t.Database, $"""
-                SELECT pa.parameter_id AS [#], pa.name, {TypeSql("ty", "pa")} AS type, pa.is_output AS output, pa.has_default_value AS has_default
+                SELECT pa.parameter_id AS [#], pa.name, {TypeSql("ty", "pa")} AS type, pa.is_output AS [output], pa.has_default_value AS has_default
                 FROM sys.parameters pa
                 JOIN sys.types ty ON ty.user_type_id = pa.user_type_id
                 WHERE pa.object_id = @id
