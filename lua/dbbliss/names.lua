@@ -2,41 +2,46 @@
 -- it is tested without a buffer (tests/nvim/catalog_test.lua).
 local M = {}
 
+--- The last byte of a quoted run that opens at `i` and closes with `close`; a doubled `close` is a
+--- literal one. Nil when it is not closed.
+local function quoted_end(s, i, close)
+  local j = i + 1
+  while j <= #s do
+    if s:sub(j, j) ~= close then
+      j = j + 1
+    elseif s:sub(j + 1, j + 1) == close then
+      j = j + 2
+    else
+      return j
+    end
+  end
+  return nil
+end
+
 --- One part of a name at byte `i` (1-based): "quoted ""x""", [bracketed], or a plain word.
 --- Returns the index of its last byte, or nil.
 local function part_end(s, i)
   local c = s:sub(i, i)
   if c == '"' then
-    local j = i + 1
-    while j <= #s do
-      if s:sub(j, j) == '"' then
-        if s:sub(j + 1, j + 1) == '"' then
-          j = j + 2
-        else
-          return j
-        end
-      else
-        j = j + 1
-      end
-    end
-    return nil
+    return quoted_end(s, i, '"')
   elseif c == '[' then
-    local j = i + 1
-    while j <= #s do
-      if s:sub(j, j) == ']' then
-        if s:sub(j + 1, j + 1) == ']' then
-          j = j + 2
-        else
-          return j
-        end
-      else
-        j = j + 1
-      end
-    end
-    return nil
+    return quoted_end(s, i, ']')
   end
   -- Bytes >= 128 belong to UTF-8 letters.
   local _, e = s:find('^[%w_$#@\128-\255]+', i)
+  return e
+end
+
+--- The end of the qualified name that starts with the part ending at `e`: follows `.part` as long
+--- as it continues.
+local function name_end(s, e)
+  while s:sub(e + 1, e + 1) == '.' do
+    local e2 = part_end(s, e + 2)
+    if not e2 then
+      break
+    end
+    e = e2
+  end
   return e
 end
 
@@ -49,24 +54,16 @@ function M.at_cursor(line, col)
   local i = 1
   while i <= #line do
     local e = part_end(line, i)
-    if not e then
-      i = i + 1
-    else
-      local start = i
-      -- Follow `.part` as long as it continues.
-      while line:sub(e + 1, e + 1) == '.' do
-        local e2 = part_end(line, e + 2)
-        if not e2 then
-          break
-        end
-        e = e2
-      end
+    if e then
+      local last = name_end(line, e)
       -- On the name, or on the character right after it (the cursor sits after the last letter in
       -- insert mode and at the end of a line).
-      if pos >= start and pos <= e + 1 then
-        return line:sub(start, e)
+      if pos >= i and pos <= last + 1 then
+        return line:sub(i, last)
       end
-      i = e + 1
+      i = last + 1
+    else
+      i = i + 1
     end
   end
   return nil
