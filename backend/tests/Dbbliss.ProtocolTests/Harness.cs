@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Text;
 using System.Text.Json.Nodes;
+using Dbbliss.Backend.Engines;
 using Dbbliss.Backend.Rpc;
 
 namespace Dbbliss.ProtocolTests;
@@ -33,12 +34,12 @@ public sealed class Harness : IAsyncDisposable
     /// <summary>The backend's stdout. Can hold the backend right after it has written a chosen message.</summary>
     public HoldingStream Stdout { get; }
 
-    public Harness()
+    public Harness(params IEngine[] extraEngines)
     {
         var backendIn = new AnonymousPipeClientStream(PipeDirection.In, _stdin.ClientSafePipeHandle);
         Stdout = new HoldingStream(new AnonymousPipeClientStream(PipeDirection.Out, _stdout.ClientSafePipeHandle));
         Engine = new FakeEngine(Server);
-        Backend = new Backend.Backend(new Output(Stdout), [Engine]);
+        Backend = new Backend.Backend(new Output(Stdout), [Engine, .. extraEngines]);
         _writer = new StreamWriter(_stdin, new UTF8Encoding(false)) { AutoFlush = true, NewLine = "\n" };
         _run = Task.Run(() => Backend.RunAsync(backendIn));
         _read = Task.Run(ReadLoopAsync);

@@ -40,8 +40,9 @@ public static class CsvCases
             await csv.RowAsync(0, new JsonArray(8, " padded "));                  // spaces alone need no quotes
             await csv.RowAsync(0, new JsonArray(9, "h\u00e9llo \u2603 \U0001F600")); // UTF-8
             await csv.RowAsync(0, new JsonArray(true, 1.5));                     // non-strings use their JSON text
+            await csv.RowAsync(0, new JsonArray(11, new JsonArray(1, 2)));       // a nested value is its JSON text, quoted for the comma
             await csv.ResultSetDoneAsync(0, 10);
-            if (csv.Rows != 10) throw new TestFailure($"rows written: {csv.Rows}");
+            if (csv.Rows != 11) throw new TestFailure($"rows written: {csv.Rows}");
         }
         var bytes = await File.ReadAllBytesAsync(path);
         if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) throw new TestFailure("the file starts with a BOM");
@@ -56,7 +57,8 @@ public static class CsvCases
             "7,\"cr\rhere\"",
             "8, padded ",
             "9,h\u00e9llo \u2603 \U0001F600",
-            "true,1.5") + "\r\n";
+            "true,1.5",
+            "11,\"[1,2]\"") + "\r\n";
         var actual = new UTF8Encoding(false, true).GetString(bytes);
         if (actual != expected) throw new TestFailure($"csv differs:\nexpected {Show(expected)}\nactual   {Show(actual)}");
     }

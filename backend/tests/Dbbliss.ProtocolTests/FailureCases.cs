@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using Dbbliss.Backend.Engines;
 using Dbbliss.Backend.Rpc;
 
 namespace Dbbliss.ProtocolTests;
@@ -195,6 +196,19 @@ public static class FailureCases
         if (done["status"]?.GetValue<string>() != "error") throw new TestFailure("a full disk ended as " + done.ToJsonString());
         if (done["export"]?["complete"]?.GetValue<bool>() != false) throw new TestFailure("a failed export was marked complete: " + done.ToJsonString());
         if (!(done["error"]?["message"]?.GetValue<string>() ?? "").Contains("/dev/full", StringComparison.Ordinal)) throw new TestFailure("the error does not name the file: " + done.ToJsonString());
+
+        // A query that dies by itself keeps its own error: a write failure in the cleanup does not replace it.
+        await h.ResultAsync("execute", new JsonObject
+        {
+            ["connection_id"] = c, ["query_id"] = "q2", ["sql"] = "ROWSFAIL 10",
+            ["export"] = new JsonObject { ["path"] = "/dev/full", ["overwrite"] = true },
+        });
+        var failed = (await h.NotificationAsync("query/done", "q2"))["params"]!;
+        if (failed["status"]?.GetValue<string>() != "error" || !(failed["error"]?["message"]?.GetValue<string>() ?? "").Contains("after the rows", StringComparison.Ordinal))
+        {
+            throw new TestFailure("the query's own error was replaced: " + failed.ToJsonString());
+        }
+        if (failed["export"]?["complete"]?.GetValue<bool>() != false) throw new TestFailure("a failed export was marked complete: " + failed.ToJsonString());
     }
 
     // Rows that arrive after a cancel beyond the overflow cap are dropped, and counted in query/done:
@@ -245,6 +259,23 @@ public static class FailureCases
             h.Stdout.FailAfter("\"result\":{\"query_id\"");
             h.Send("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q", ["sql"] = "ROWS 3" });
             await Completes(h, "query/done that could not be written");
+        }
+        // several writes that fail one after the other: the first one starts the shutdown, the others only fail
+        await using (var h = new Harness())
+        {
+            h.Stdout.FailAfter("\"protocol\"");
+            await h.ResultAsync("initialize");
+            for (var i = 0; i < 5; i++) h.Send("initialize");
+            await Completes(h, "several writes that could not be made");
+        }
+        // a server message that arrives after the statement, when stdout is gone
+        await using (var h = new Harness())
+        {
+            var c = await h.ConnectAsync();
+            h.Stdout.FailAfter("\"result\":{\"query_id\"");
+            h.Send("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q", ["sql"] = "LATENOTICE gone" });
+            await Completes(h, "a late message that could not be written");
+            await Task.Delay(500); // the message is sent 100 ms after the statement; nothing may come of it
         }
         // the warning about an unacknowledged cancel that cannot be written
         await using (var h = new Harness())
@@ -315,5 +346,85 @@ public static class FailureCases
         g.Server.DisposeThrows = false;
         var after = await g.CallAsync("disconnect", new JsonObject { ["connection_id"] = d });
         if (after["error"]?["code"]?.GetValue<int>() != RpcErrors.UnknownConnection) throw new TestFailure("the connection survived a failing close: " + after.ToJsonString());
+    }
+
+    // Reading stdin fails (the pipe broke): the same as stdin closing.
+    public static async Task StdinReadErrorShutsDown()
+    {
+        var backend = new Dbbliss.Backend.Backend(new Output(new MemoryStream()), [new FakeEngine(new FakeServer())]);
+        await backend.RunAsync(new ThrowingReadStream());
+        await backend.Completion.WaitAsync(Wait);
+    }
+
+    private sealed class ThrowingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new IOException("the pipe broke (simulated)");
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => throw new IOException("the pipe broke (simulated)");
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    // An engine without catalog support says so; messages a catalog session receives are not shown.
+    public static async Task CatalogWithoutSupportAndQuietSession()
+    {
+        await using (var h = new Harness(new FakeEngine(new FakeServer(), "plain", hasCatalog: false)))
+        {
+            var c = (await h.ResultAsync("connect", new JsonObject { ["engine"] = "plain", ["connection_string"] = "x" }))["connection_id"]!.GetValue<string>();
+            var response = await h.CallAsync("catalog/children", new JsonObject { ["connection_id"] = c });
+            if (response["error"]?["code"]?.GetValue<int>() != RpcErrors.InvalidParams
+                || !response["error"]!["message"]!.GetValue<string>().Contains("no catalog support", StringComparison.Ordinal))
+            {
+                throw new TestFailure("an engine without a catalog: " + response.ToJsonString());
+            }
+        }
+        await using (var h = new Harness())
+        {
+            h.Server.MessageOnOpen = "welcome";
+            var c = await h.ConnectAsync();
+            await Task.Delay(300);
+            int Banners() => h.Messages.Count(m => m["method"]?.GetValue<string>() == "connection/message" && m["params"]?["text"]?.GetValue<string>() == "welcome");
+            var before = Banners();
+            await h.ResultAsync("catalog/children", new JsonObject { ["connection_id"] = c });
+            await Task.Delay(300);
+            if (Banners() != before) throw new TestFailure("a message of the catalog session reached the client");
+        }
+    }
+
+    // A client that reads slowly makes the backend wait for it, not drop rows or give up (HLR-DATA-2).
+    public static async Task ASlowReaderGetsEveryRow()
+    {
+        const int total = 30_000;
+        await using var h = new Harness();
+        var c = await h.ConnectAsync();
+        var stalled = h.Stdout.Arm("query/rows");
+        await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = "q", ["sql"] = $"ROWS {total}" });
+        await stalled.WaitAsync(Wait);
+        await Task.Delay(700); // the pages queue up to the limit and the query thread waits
+        h.Stdout.Release();
+        var done = (await h.NotificationAsync("query/done", "q"))["params"]!;
+        if (done["status"]?.GetValue<string>() != "completed") throw new TestFailure("the query did not complete: " + done.ToJsonString());
+        var delivered = h.Messages.Where(m => m["method"]?.GetValue<string>() == "query/rows").Sum(m => (long)m["params"]!["rows"]!.AsArray().Count);
+        if (delivered != total || done["truncated_rows"] is not null) throw new TestFailure($"delivered {delivered} of {total}: {done.ToJsonString()}");
+    }
+
+    // Error lines: the engine's own line, or one found from the character offset (also when the
+    // offset points past the end), both counted from the first line of the statement in the buffer.
+    public static async Task ErrorLinesOfEveryKind()
+    {
+        await using var h = new Harness();
+        var c = await h.ConnectAsync();
+        foreach (var (sql, expected) in new[] { ("LINEFAIL", 13), ("POSFAR", 11) })
+        {
+            await h.ResultAsync("execute", new JsonObject { ["connection_id"] = c, ["query_id"] = sql, ["sql"] = sql, ["line_offset"] = 10 });
+            var error = (await h.NotificationAsync("query/done", sql))["params"]!["error"]!;
+            if (error["buffer_line"]?.GetValue<int>() != expected) throw new TestFailure($"{sql}: buffer_line {error["buffer_line"]}, expected {expected}");
+        }
     }
 }

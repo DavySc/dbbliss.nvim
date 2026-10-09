@@ -113,4 +113,13 @@ public static class RobustnessCases
         var again = await h.CallAsync("shutdown");
         if (again["error"] is not null) throw new TestFailure($"a second shutdown was refused: {again.ToJsonString()}");
     }
+
+    // Each statement of a script comes back with the kind the production confirmation relies on.
+    public static async Task ScriptSplitReportsKinds()
+    {
+        await using var h = new Harness();
+        var result = await h.ResultAsync("script/split", new JsonObject { ["engine"] = "fake", ["text"] = "select 1; insert into t values (1); select 2" });
+        var kinds = string.Join(",", result["statements"]!.AsArray().Select(x => x!["kind"]!.GetValue<string>()));
+        if (kinds != "read,write,read") throw new TestFailure("kinds: " + kinds);
+    }
 }

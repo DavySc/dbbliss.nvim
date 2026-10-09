@@ -43,6 +43,16 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("instances_with_an_unusable_state_dir", "", () => { UnitCases.InstancesWithAnUnusableStateDir(); return Task.CompletedTask; }),
     // Verifies: HLR-PAGE-3
     ("fetch_without_a_window_grants_nothing", "", UnitCases.FetchWithoutAWindow),
+    // Verifies: HLR-LIFE-1
+    ("stdin_read_error_shuts_down", "", FailureCases.StdinReadErrorShutsDown),
+    // Verifies: HLR-CAT-5
+    ("catalog_without_support_and_quiet_session", "", FailureCases.CatalogWithoutSupportAndQuietSession),
+    // Verifies: HLR-DATA-2
+    ("a_slow_reader_gets_every_row", "", FailureCases.ASlowReaderGetsEveryRow),
+    // Verifies: HLR-SCRIPT-3
+    ("error_lines_of_every_kind", "", FailureCases.ErrorLinesOfEveryKind),
+    // Verifies: HLR-PROD-1
+    ("script_split_reports_kinds", "", RobustnessCases.ScriptSplitReportsKinds),
     // Verifies: HLR-TX-4
     ("shutdown_is_bounded", "", FailureCases.ShutdownIsBounded),
     // Verifies: HLR-TX-4
@@ -256,6 +266,10 @@ static async Task CancelIsResentAndWarns()
     await h.ResultAsync("cancel", new JsonObject { ["query_id"] = "q" });
     await h.WaitForAsync(m => m["method"]?.GetValue<string>() == "query/message" && m["params"]?["severity"]?.GetValue<string>() == "warning",
         "the warning that the cancel was not acknowledged");
+    // The warning is given once, however long the server stays silent.
+    await Task.Delay(2500);
+    var warnings = h.Messages.Count(m => m["method"]?.GetValue<string>() == "query/message" && m["params"]?["severity"]?.GetValue<string>() == "warning");
+    if (warnings != 1) throw new TestFailure($"the unacknowledged cancel was warned about {warnings} times, expected once");
     var sent = Volatile.Read(ref h.Server.CancelRequests);
     if (sent < 4) throw new TestFailure($"the protocol cancel was sent {sent} time(s) in the first second, expected the first plus its re-sends");
     if (h.Server.Open.IsEmpty) throw new TestFailure("the backend closed the session instead of waiting for the server");

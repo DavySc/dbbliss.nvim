@@ -31,11 +31,15 @@ public sealed class FakeServer
     public bool DisposeThrows { get; set; }
     public TaskCompletionSource? DisposeHangs { get; set; }
     public int OpenCount;
+
+    /// <summary>A message every new session sends while it opens, like a server banner.</summary>
+    public string? MessageOnOpen { get; set; }
     public int DisposeAttempts;
 
     internal FakeSession OpenSession(IMessageSink messages)
     {
         if (OpensBeforeRefusing is { } n && Interlocked.Increment(ref OpenCount) > n) throw new FakeServerException("too many sessions");
+        if (MessageOnOpen is { } banner) messages.Message("info", banner, null, null);
         var session = new FakeSession(this, "s" + Interlocked.Increment(ref _nextSession), messages);
         Open[session.ServerSessionId] = session;
         return session;
@@ -48,13 +52,13 @@ public sealed class FakeServer
     }
 }
 
-public sealed class FakeEngine(FakeServer server) : IEngine
+public sealed class FakeEngine(FakeServer server, string name = "fake", bool hasCatalog = true) : IEngine
 {
-    public string Name => "fake";
+    public string Name => name;
 
     public FakeCatalog FakeCatalog { get; } = new();
 
-    public ICatalog? Catalog => FakeCatalog;
+    public ICatalog? Catalog => hasCatalog ? FakeCatalog : null;
 
     public Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct) =>
         spec.ConnectionString == "refuse"
@@ -62,7 +66,12 @@ public sealed class FakeEngine(FakeServer server) : IEngine
             : Task.FromResult<IEngineSession>(server.OpenSession(messages));
 
     public ErrorInfo DescribeError(Exception ex) =>
-        ex is FakeServerException { Position: { } position } ? new ErrorInfo(ex.Message, Position: position) : new ErrorInfo(ex.Message);
+        ex switch
+        {
+            FakeServerException { Position: { } position } => new ErrorInfo(ex.Message, Position: position),
+            FakeServerException { Line: { } line } => new ErrorInfo(ex.Message, Line: line),
+            _ => new ErrorInfo(ex.Message),
+        };
 }
 
 /// <summary>
@@ -85,6 +94,9 @@ public sealed class FakeSession(FakeServer server, string id, IMessageSink messa
     {
         if (sql.StartsWith("ROWS ", StringComparison.Ordinal)) return StreamRowsAsync(int.Parse(sql[5..]), sink);
         if (sql == "STUCK") return StuckAsync(control);
+        if (sql.StartsWith("ROWSFAIL ", StringComparison.Ordinal)) return RowsThenFailAsync(int.Parse(sql[9..]), sink);
+        if (sql == "POSFAR") throw new FakeServerException("syntax error", 9999);
+        if (sql == "LINEFAIL") throw new FakeServerException("syntax error", line: 3);
         if (sql.StartsWith("NOTICE ", StringComparison.Ordinal))
         {
             messages.Message("info", sql[7..], 1, 1);
@@ -131,6 +143,14 @@ public sealed class FakeSession(FakeServer server, string id, IMessageSink messa
             }
         }
         return Task.FromResult(new ExecuteSummary(-1));
+    }
+
+    /// <summary>"ROWSFAIL n": n rows, then an error, as a server does when a statement dies half way.</summary>
+    private static async Task<ExecuteSummary> RowsThenFailAsync(int n, IResultSink sink)
+    {
+        await sink.ResultSetAsync(0, [new ColumnInfo("id", "int"), new ColumnInfo("v", "text"), new ColumnInfo("n", "text"), new ColumnInfo("q", "text")]);
+        for (var i = 1; i <= n; i++) await sink.RowAsync(0, new JsonArray(i, "v" + i, null, "q\"x"));
+        throw new FakeServerException("statement failed after the rows");
     }
 
     private async Task<ExecuteSummary> StuckAsync(QueryControl control)
@@ -213,7 +233,8 @@ public sealed class FakeSession(FakeServer server, string id, IMessageSink messa
     }
 }
 
-public sealed class FakeServerException(string message, int? position = null) : Exception(message)
+public sealed class FakeServerException(string message, int? position = null, int? line = null) : Exception(message)
 {
     public int? Position { get; } = position;
+    public int? Line { get; } = line;
 }

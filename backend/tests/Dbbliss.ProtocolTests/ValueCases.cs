@@ -66,6 +66,7 @@ public static class ValueCases
         // Anything else formattable is formatted without the culture; anything unknown becomes its text.
         Is("\"123456789012345678901234567890\"", System.Numerics.BigInteger.Parse("123456789012345678901234567890"));
         Is("\"10.0.0.1\"", System.Net.IPAddress.Parse("10.0.0.1"));
+        Is("\"http://example.test/a\"", new Uri("http://example.test/a")); // not formattable: its text
 
         // A whole row from a driver: NULL and DBNull become JSON null, the rest is converted.
         var table = new System.Data.DataTable();

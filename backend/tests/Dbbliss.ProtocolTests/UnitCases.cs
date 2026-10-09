@@ -87,6 +87,31 @@ public static class UnitCases
             }
         }
 
+        // libsecret needs a table of attributes
+        foreach (var bad in new JsonNode?[] { JsonValue.Create("service"), new JsonObject() })
+        {
+            try
+            {
+                Credentials.Resolve(new JsonObject { ["libsecret"] = bad });
+                throw new TestFailure("libsecret without attributes was accepted");
+            }
+            catch (RpcException ex)
+            {
+                Check(ex.Code == RpcErrors.InvalidParams, $"libsecret shape: {ex.Code} {ex.Message}");
+            }
+        }
+
+        // A tool that fails without a word still gives the user something to act on.
+        try
+        {
+            Credentials.Resolve(new JsonObject { ["pass"] = "x" }, (_, _) => (2, "", ""));
+            throw new TestFailure("a failing tool gave a password");
+        }
+        catch (RpcException ex)
+        {
+            Check(ex.Code == RpcErrors.CredentialNotFound && ex.Message.Contains("may not exist", StringComparison.Ordinal), $"silent tool failure: {ex.Message}");
+        }
+
         // A tool that does not answer is killed and reported (a passphrase prompt that nobody sees).
         if (OperatingSystem.IsLinux() || OperatingSystem.IsMacOS())
         {

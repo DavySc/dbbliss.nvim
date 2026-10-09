@@ -810,19 +810,13 @@ public sealed class Backend
         }
     }
 
-    private sealed class Lease(SemaphoreSlim semaphore) : IDisposable, IAsyncDisposable
+    private sealed class Lease(SemaphoreSlim semaphore) : IDisposable
     {
         private int _released;
 
         public void Dispose()
         {
             if (Interlocked.Exchange(ref _released, 1) == 0) semaphore.Release();
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            Dispose();
-            return ValueTask.CompletedTask;
         }
     }
 }
