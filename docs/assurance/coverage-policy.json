@@ -1,0 +1,17 @@
+{
+  "tolerance": 0.1,
+  "exclude": ["RegexGenerator.g.cs", "Db2iEngine.cs"],
+  "critical": [
+    "backend/src/Dbbliss.Backend/Backend.cs",
+    "backend/src/Dbbliss.Backend/Rpc/ResultStreamer.cs",
+    "backend/src/Dbbliss.Backend/Rpc/Output.cs",
+    "backend/src/Dbbliss.Backend/Rpc/CsvExport.cs",
+    "backend/src/Dbbliss.Backend/Engines/QueryControl.cs",
+    "backend/src/Dbbliss.Backend/Engines/ValueConverter.cs",
+    "backend/src/Dbbliss.Backend/Scripts/ScriptSplitter.cs",
+    "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs",
+    "backend/src/Dbbliss.Backend/Credentials.cs",
+    "backend/src/Dbbliss.Backend/Instances.cs",
+    "backend/src/Dbbliss.Backend/Catalog/ObjectNames.cs"
+  ]
+}
