@@ -146,15 +146,6 @@
    "category": "defensive"
   },
   {
-   "file": "backend/src/Dbbliss.Backend/Management/SqlServerManagement.cs",
-   "match": "public ValueTask ResultSetAsync(int index, IReadOnlyList<ColumnInfo> columns)",
-   "before": 0,
-   "after": 2,
-   "kind": "line",
-   "reason": "BACKUP DATABASE and RESTORE VERIFYONLY return no result set (their output is messages), so the sink that discards rows is never called; it exists because ExecuteAsync needs a sink.",
-   "category": "unreachable"
-  },
-  {
    "file": "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs",
    "match": "catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)",
    "before": 0,

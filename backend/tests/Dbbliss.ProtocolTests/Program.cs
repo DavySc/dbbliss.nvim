@@ -252,6 +252,10 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("plan_mssql_threads_warnings_and_bad_output", "", PlanParserTests.SqlServerThreadsWarningsAndBadOutput),
     // Verifies: HLR-PLAN-7
     ("plan_own_figures_and_hottest_node", "", () => { PlanParserTests.OwnFiguresAndTheHottestNode(); return Task.CompletedTask; }),
+    // Verifies: HLR-PLAN-7
+    ("plan_parsers_unusual_but_valid_input", "", () => { PlanParserTests.UnusualButValidInput(); return Task.CompletedTask; }),
+    // Verifies: HLR-PLAN-7, HLR-PLAN-8
+    ("plan_models_and_sinks", "", () => { PlanParserTests.ModelsAndSinks(); return Task.CompletedTask; }),
     // Verifies: HLR-PLAN-1, HLR-PLAN-7
     ("plan_comes_back_as_one_notification", "", PlanTests.APlanComesBackAsOneNotification),
     // Verifies: HLR-PLAN-4

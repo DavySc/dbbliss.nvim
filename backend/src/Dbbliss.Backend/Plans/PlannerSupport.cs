@@ -4,7 +4,7 @@ using Dbbliss.Backend.Management;
 
 namespace Dbbliss.Backend.Plans;
 
-internal static class PlannerSupport
+public static class PlannerSupport
 {
     /// <summary>
     /// Ends the transaction an actual plan ran in. A rollback that cannot be sent (the connection broke) loses nothing:

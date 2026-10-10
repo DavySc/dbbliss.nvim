@@ -252,4 +252,95 @@ public static class PlanParserTests
         // nothing to compare
         Is(PlanMath.Annotate(new PlanNode { Id = 0, Operator = "x" }), null, "no figures, no hottest node");
     }
+
+    // Verifies: HLR-PLAN-7
+    public static void UnusualButValidInput()
+    {
+        // PostgreSQL: trouble a node reports, and nodes that give little.
+        const string pg = """
+            [{"Plan": {"Node Type": "Gather", "Workers Planned": 4, "Workers Launched": 2, "Actual Rows": 1, "Actual Loops": 1, "Actual Total Time": 3.0,
+              "Plans": [
+                {"Node Type": "Sort", "Sort Space Type": "Disk", "Actual Rows": 1, "Actual Loops": 1, "Actual Total Time": 1.0},
+                {"Node Type": "HashAggregate", "Disk Usage": 2048, "Actual Rows": 1, "Actual Loops": 1, "Actual Total Time": 1.0},
+                {"Node Type": "Sort", "Sort Space Type": "Memory", "Workers Planned": 2, "Workers Launched": 2, "Disk Usage": 0, "Hash Batches": 1, "Actual Loops": 0},
+                {"Node Type": "Result", "Actual Rows": 3, "Actual Total Time": 1.5},
+                {"Total Cost": 1.0}
+              ]}}]
+            """;
+        var doc = PostgresPlanParser.Parse(pg, "q", PlanMode.Actual);
+        var nodes = Walk(doc.Root).ToList();
+        Contains(string.Join(";", nodes[0].Warnings), "launched 2 of 4 planned workers", "workers that did not start");
+        Contains(string.Join(";", nodes[1].Warnings), "? kB", "a sort on disk that did not say how much");
+        Contains(string.Join(";", nodes[2].Warnings), "2048 kB", "a hash aggregate on disk");
+        Is(nodes[3].Warnings.Count, 0, "nothing wrong: a sort in memory, all workers, one hash batch, no disk");
+        Is(nodes[4].Cost, null, "a node with no cost has none");
+        Is(nodes[5].Operator, "?", "a node that does not say what it is");
+        Near(nodes[4].ActualRows, 3, "no loops reported: one");
+        Near(nodes[4].TimeMs, 1.5, "no loops reported: one");
+        if (doc.Totals.ContainsKey("cost")) throw new TestFailure("no cost, no cost total");
+
+        // SQL Server: attributes missing, a bare object, other findings.
+        const string xml = """
+            <ShowPlanXML xmlns="http://schemas.microsoft.com/sqlserver/2004/07/showplan"><BatchSequence><Batch><Statements>
+              <StmtSimple StatementSubTreeCost="oops" StatementEstRows="3">
+                <QueryPlan>
+                  <MissingIndexes><MissingIndexGroup><MissingIndex Schema="[dbo]" Table="[t]"><ColumnGroup><Column Name="[k]"/></ColumnGroup></MissingIndex></MissingIndexGroup>
+                    <MissingIndexGroup Impact="10"><MissingIndex><ColumnGroup Usage="INCLUDE"><Column Name="[z]"/></ColumnGroup></MissingIndex></MissingIndexGroup></MissingIndexes>
+                  <Warnings NoJoinPredicate="false"><ColumnsWithNoStatistics/><PlanAffectingConvert/></Warnings>
+                  <RelOp PhysicalOp="Index Seek" LogicalOp="Index Seek">
+                    <RunTimeInformation><RunTimeCountersPerThread Thread="0" ActualRows="4" ActualExecutions="3"/></RunTimeInformation>
+                    <IndexScan><Object Table="[t]" Alias="[x]" Index="[ix]"/><Predicate><ScalarOperator ScalarString="[t].[k]=(1)"/></Predicate></IndexScan>
+                    <RelOp><Warnings><SpillToTempDb/></Warnings><Sort/></RelOp>
+                    <RelOp NodeId="7" PhysicalOp="Clustered Index Scan"><Scan><Object Schema="[dbo]"/><Predicate/></Scan></RelOp>
+                    <RelOp NodeId="8" PhysicalOp="Filter"><Filter><Predicate><ScalarOperator/></Predicate></Filter></RelOp>
+                  </RelOp>
+                </QueryPlan>
+              </StmtSimple>
+            </Statements></Batch></BatchSequence></ShowPlanXML>
+            """;
+        var docs = SqlServerPlanParser.Parse(xml, PlanMode.Actual);
+        var seek = docs[0].Root;
+        Is(seek.Operator, "Index Seek", "logical equal to physical is said once");
+        Is(seek.Id, 0, "no NodeId: numbered in order");
+        Is(seek.Children[0].Operator, "?", "no PhysicalOp");
+        Is(seek.Children[0].Id, 1, "next number");
+        Contains(seek.Detail, "[t] as [x]", "a table without a schema, with its alias");
+        Contains(seek.Detail, "index [ix]", "index");
+        Contains(seek.Detail, "where [t].[k]=(1)", "predicate");
+        Near(seek.Loops, 3, "executions are the loops");
+        Near(seek.TimeMs, 0, "a thread without a time");
+        Contains(string.Join(";", seek.Children[0].Warnings), "spill to tempdb", "a spill without a level");
+        Is(docs[0].Statement, "", "no statement text");
+        if (docs[0].Totals.ContainsKey("statement_cost")) throw new TestFailure("a cost that is no number is not a total");
+        Contains(string.Join("\n", docs[0].Notes), "columns with no statistics", "a finding with no attributes");
+        Contains(string.Join("\n", docs[0].Notes), "plan-affecting convert", "a convert with no details");
+        if (string.Join("\n", docs[0].Notes).Contains("no join predicate", StringComparison.Ordinal)) throw new TestFailure("a flag that is false is not a warning");
+        Contains(string.Join("\n", docs[0].Notes), "missing index", "a missing index with no impact and no include");
+    }
+
+    // Verifies: HLR-PLAN-7, HLR-PLAN-8
+    public static void ModelsAndSinks()
+    {
+        // A node with warnings is sent with them.
+        var node = new PlanNode { Id = 1, Operator = "x" };
+        node.Warnings.Add("w1");
+        Is(node.ToJson()["warnings"]!.AsArray()[0]!.GetValue<string>(), "w1", "warnings in JSON");
+        // A parent with no time whose children have none either takes none from them.
+        var root = new PlanNode { Id = 0, Operator = "root", TimeMs = 10 };
+        var mid = new PlanNode { Id = 1, Operator = "mid" };
+        mid.Children.Add(new PlanNode { Id = 2, Operator = "leaf" });
+        root.Children.Add(mid);
+        root.Children.Add(new PlanNode { Id = 3, Operator = "timed", TimeMs = 4 });
+        PlanMath.Annotate(root);
+        Near(root.SelfTimeMs, 6, "10 - 4: the middle node has no time anywhere below it");
+        // The first cell of the first row of the first result set, and nothing else.
+        var cell = new PlannerSupport.FirstCell();
+        cell.RowAsync(0, new System.Text.Json.Nodes.JsonArray()).AsTask().Wait();
+        cell.RowAsync(1, new System.Text.Json.Nodes.JsonArray("second set")).AsTask().Wait();
+        cell.RowAsync(0, new System.Text.Json.Nodes.JsonArray(42)).AsTask().Wait();
+        if (cell.Value is not null) throw new TestFailure("an empty row, another result set and a number are not the plan: " + cell.Value);
+        cell.RowAsync(0, new System.Text.Json.Nodes.JsonArray("the plan")).AsTask().Wait();
+        cell.RowAsync(0, new System.Text.Json.Nodes.JsonArray("a later row")).AsTask().Wait();
+        Is(cell.Value, "the plan", "the first one stays");
+    }
 }
