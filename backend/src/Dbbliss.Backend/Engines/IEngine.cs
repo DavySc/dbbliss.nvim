@@ -1,5 +1,6 @@
 using System.Text.Json.Nodes;
 using Dbbliss.Backend.Catalog;
+using Dbbliss.Backend.Management;
 using Dbbliss.Backend.Scripts;
 using Dbbliss.Backend.Sessions;
 
@@ -18,6 +19,9 @@ public interface IEngine
 
     /// <summary>Listing, cancelling and ending other sessions; null if the engine has none.</summary>
     ISessionAdmin? Sessions { get; }
+
+    /// <summary>Backup and drop; null if the engine has none.</summary>
+    IManagement? Management { get; }
 
     Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct);
 

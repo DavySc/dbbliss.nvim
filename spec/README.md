@@ -24,6 +24,23 @@ the database server. Rows are not counted. Loss is tracked by the only actions t
 | `NoRefire.cfg` | protocol cancel sent once | liveness: a cancel before the statement is on the wire is lost |
 | `NoConnCheck.cfg` | no `client_connection_check_interval` | liveness: a killed backend leaves the query running |
 
+## `tla/Operations.tla`: a backup next to disconnect, shutdown and a drop
+
+Phase 4. One connection, one database, one long operation (a backup: `pg_dump` as a child process, or
+`BACKUP DATABASE` on a session of its own), and the things that can end its world. Boolean constants select
+design variants, as in `QueryLifecycle.tla`.
+
+| Config | Design | Result |
+|---|---|---|
+| `Ops_Proposed.cfg` | the current code | `NoOrphanTool`, `NoOpOnClosedConn`, `ProdDropBacked`, `NoDropDuringOp`; a cancelled operation's tool does stop; a stopping backend does exit |
+| `Ops_NoDisconnectGuard.cfg` | disconnect is allowed under a running operation | `NoOpOnClosedConn` |
+| `Ops_NoDropGuard.cfg` | a drop is allowed under a running operation | `NoDropDuringOp` |
+| `Ops_NoShutdownCancel.cfg` | shutdown does not cancel the tool | `NoOrphanTool` (a `pg_dump` outlives the backend) |
+| `Ops_NoBackupRule.cfg` | a prod drop needs no backup | `ProdDropBacked` |
+| `Ops_StaleBackupCounts.cfg` | a backup that has gone stale (time passed) still counts | `ProdDropBacked` |
+
+Not modelled: a *killed* backend (nothing ties `pg_dump` to its parent; `docs/phase4-decisions.md`, 55).
+
 ## `quint/client.qnt`: Lua client, connection lease, transactions
 
 The user (connect, exec, cancel, begin/commit/rollback, disconnect), the Lua client's state and

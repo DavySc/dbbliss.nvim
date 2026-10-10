@@ -7,6 +7,7 @@ local info = require('dbbliss.info')
 local names = require('dbbliss.names')
 local tree = require('dbbliss.tree')
 local sessions = require('dbbliss.sessions')
+local management = require('dbbliss.management')
 
 local M = {}
 
@@ -137,9 +138,18 @@ function M.setup(opts)
     script = function(_, conn_name, node)
       M._script(conn_name, M._object_params(node))
     end,
+    drop = function(_, conn_name, node)
+      M._drop_node(conn_name, node)
+    end,
     show_system = state.config.tree.show_system,
   })
   sessions.setup({
+    request = function(conn_id, method, params, cb)
+      M._catalog_request(conn_id, method, params, cb)
+    end,
+    notify = notify,
+  })
+  management.setup({
     request = function(conn_id, method, params, cb)
       M._catalog_request(conn_id, method, params, cb)
     end,
@@ -181,6 +191,12 @@ local function on_backend_exit(code, signal)
 end
 
 local function register_handlers(b)
+  b:on('backup/progress', function(p)
+    management.handle_notification('backup/progress', p)
+  end)
+  b:on('backup/done', function(p)
+    management.handle_notification('backup/done', p)
+  end)
   b:on('query/resultset', function(p)
     local q = state.queries[p.query_id]
     if q then
@@ -323,6 +339,7 @@ function M.connect(name, cb)
     connection_string = cfg.connection_string,
     password = cfg.password,
     options = cfg.options,
+    env = cfg.env,
   }, function(err, result)
     state.connecting[name] = nil
     if err then
@@ -894,6 +911,79 @@ function M.sessions()
   end
 end
 
+-- Management: backup and drop --------------------------------------------------------------------
+
+--- The database a connection string names (PostgreSQL `Database=`, SQL Server `Initial Catalog=` or `Database=`).
+---@param connection_string string
+---@return string?
+function M._database_of(connection_string)
+  for part in (connection_string or ''):gmatch('[^;]+') do
+    local key, value = part:match('^%s*([^=]-)%s*=%s*(.-)%s*$')
+    if key and (key:lower() == 'database' or key:lower() == 'initial catalog') and value ~= '' then
+      return value
+    end
+  end
+  return nil
+end
+
+--- Backs up the current connection's database to a file (a file on this machine for PostgreSQL, on the
+--- server for SQL Server), verifies it, and shows progress in a floating window.
+---@param path string?
+function M.backup(path)
+  local cname, conn = current_connection()
+  if not conn then
+    return
+  end
+  local cfg = state.config.connections[cname] or {}
+  local database = M._database_of(cfg.connection_string)
+  if not database then
+    database = vim.fn.input('Database to back up: ')
+    if database == '' then
+      return
+    end
+  end
+  management.backup({
+    conn_id = conn.id,
+    conn_name = cname,
+    engine = cfg.engine,
+    env = cfg.env,
+    database = database,
+    path = path ~= '' and path or nil,
+  })
+end
+
+---@param cname string
+---@param node dbbliss.TreeNode
+function M._drop_node(cname, node)
+  local conn = state.connections[cname]
+  if not conn then
+    return notify(cname .. ' is not connected', vim.log.levels.ERROR)
+  end
+  local cfg = state.config.connections[cname] or {}
+  management.drop({
+    conn_id = conn.id,
+    conn_name = cname,
+    engine = cfg.engine,
+    env = cfg.env,
+    kind = node.kind,
+    database = node.path.database or M._database_of(cfg.connection_string),
+    schema = node.path.schema,
+    name = node.name,
+    identity = node.identity,
+    refresh = function()
+      tree.refresh_all()
+    end,
+  })
+end
+
+--- Drops the object or database under the cursor in the schema tree (key `D` there).
+function M.drop()
+  if vim.api.nvim_get_current_buf() == tree._state.buf then
+    return tree.drop()
+  end
+  notify('drop: open the schema tree (:Dbbliss tree), put the cursor on the object and press D', vim.log.levels.INFO)
+end
+
 --- Buffer-local keys in SQL buffers (config.mappings).
 function M._apply_mappings()
   local lhs = state.config.mappings and state.config.mappings.info
@@ -1046,6 +1136,14 @@ local subcommands = {
   -- The schema browser.
   tree = function()
     M.tree()
+  end,
+  -- Backs up the connection's database to a file (the path may be left out: it is asked, with a default).
+  backup = function(args)
+    M.backup(table.concat(args, ' '))
+  end,
+  -- Drops the object under the cursor of the schema tree (same as `D` there).
+  drop = function()
+    M.drop()
   end,
   -- The server's sessions, with cancel and terminate.
   sessions = function()

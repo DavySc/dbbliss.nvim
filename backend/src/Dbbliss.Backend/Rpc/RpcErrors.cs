@@ -21,6 +21,8 @@ public static class RpcErrors
     public const int Catalog = 1007;
     /// <summary>A session action the user can fix: the session changed, is gone, is the connection's own, or the engine has no such action.</summary>
     public const int Session = 1008;
+    /// <summary>A management request the user can fix: a tool is missing, a file exists, the typed name is wrong, a backup is required first.</summary>
+    public const int Management = 1009;
 }
 
 public sealed class RpcException(int code, string message, JsonNode? data = null) : Exception(message)

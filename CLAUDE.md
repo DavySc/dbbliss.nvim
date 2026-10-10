@@ -6,11 +6,15 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 ## Status (2026-10-10)
 
-**Phase 3 (sessions: list, cancel statement, terminate, rollback status) is implemented on branch
-`ccr-48313f28-j61iv5`; not merged into `main`: stop for the user's review.** Built spec-first
-(`HLR-ADM-1..8`, `LLR-ADM-9..12`). Decisions to review: `docs/phase3-decisions.md` (43–50). Code:
-`Sessions/` (backend), `sessions.lua` (Lua); tests in `SessionTests.cs`, `SessionEngineTests.cs`,
-`SessionScenarios.cs`, `tests/nvim/sessions_test.lua`.
+**Phase 4 (backup, drop, progress window) is implemented on branch `ccr-48313f28-j61iv5`; not merged into
+`main`: stop for the user's review.** Built spec-first (`HLR-MGT-1..11`, `LLR-MGT-18`) with a model,
+`spec/tla/Operations.tla`. Decisions to review: `docs/phase4-decisions.md` (51–60). Code: `Management/`
+(backend), `management.lua` (Lua); tests in `ManagementTests.cs`, `ManagementEngineTests.cs`,
+`ManagementScenarios.cs`, `tests/nvim/management_test.lua`. The cancel suite needs `pg_dump` and
+`pg_restore` of the server's version (`DBBLISS_TEST_PG_BIN`; CI installs the 17 client).
+
+**Phase 3 (sessions: list, cancel statement, terminate, rollback status) is complete and on `main`.**
+Decisions: `docs/phase3-decisions.md` (43–50). Code: `Sessions/` (backend), `sessions.lua` (Lua).
 
 **Phase 2 (object info, schema tree, CREATE scripts) is complete and on `main`.** Decisions:
 `docs/phase2-decisions.md` (35–42). Code: `Catalog/` (backend), `info.lua`, `tree.lua`, `names.lua`
@@ -99,6 +103,7 @@ docker compose up -d --wait
 scripts/build.sh                     # publishes bin/linux-x64/dbbliss-backend; the cancel suite uses it
 export DBBLISS_TEST_PG='Host=localhost;Port=55432;Username=dbbliss;Database=dbbliss' DBBLISS_TEST_PG_PASSWORD=dbbliss-test-Pw1
 export DBBLISS_TEST_MSSQL='Server=localhost,51433;User Id=sa;TrustServerCertificate=true' DBBLISS_TEST_MSSQL_PASSWORD=dbbliss-test-Pw1
+export DBBLISS_TEST_PG_BIN=/path/to/postgresql/17/bin   # pg_dump + pg_restore, not older than the server (Phase 4 scenarios)
 dotnet run --project backend/tests/Dbbliss.CancelTests [-- --scenario name,... --report file.md]
 # Through the real plugin and the published backend (also needs Neovim 0.10+):
 DBBLISS_E2E_ENGINE=postgres DBBLISS_E2E_CS="$DBBLISS_TEST_PG" DBBLISS_E2E_PW_ENV=DBBLISS_TEST_PG_PASSWORD \

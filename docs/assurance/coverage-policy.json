@@ -23,7 +23,11 @@
     "backend/src/Dbbliss.Backend/Sessions/ISessionAdmin.cs",
     "backend/src/Dbbliss.Backend/Sessions/SessionIds.cs",
     "backend/src/Dbbliss.Backend/Sessions/PostgresSessions.cs",
-    "backend/src/Dbbliss.Backend/Sessions/SqlServerSessions.cs"
+    "backend/src/Dbbliss.Backend/Sessions/SqlServerSessions.cs",
+    "backend/src/Dbbliss.Backend/Management/OperationManager.cs",
+    "backend/src/Dbbliss.Backend/Management/PostgresManagement.cs",
+    "backend/src/Dbbliss.Backend/Management/SqlServerManagement.cs",
+    "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs"
   ],
   "ignore_artifacts": [
     {

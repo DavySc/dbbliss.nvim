@@ -54,6 +54,21 @@ jobs:
           "DBBLISS_TEST_PG_PASSWORD=root" >> $env:GITHUB_ENV
           "DBBLISS_TEST_MSSQL=Server=localhost\SQLEXPRESS;Integrated Security=true;TrustServerCertificate=true" >> $env:GITHUB_ENV
 
+      # pg_dump must not be older than the server (it refuses): the images are PostgreSQL 17.
+      - name: PostgreSQL 17 client tools (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          echo "DBBLISS_TEST_PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
+
+      - name: PostgreSQL client tools (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $bin = Join-Path (Get-ChildItem 'C:\Program Files\PostgreSQL' -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName 'bin'
+          "DBBLISS_TEST_PG_BIN=$bin" >> $env:GITHUB_ENV
+
       - name: Build backend (Linux)
         if: runner.os == 'Linux'
         run: scripts/build.sh linux-x64
@@ -96,6 +111,7 @@ jobs:
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/results_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/catalog_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/sessions_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/management_test.lua
 
       - name: End-to-end through the plugin (both engines)
         shell: bash
@@ -131,6 +147,7 @@ jobs:
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/results_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/catalog_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/sessions_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/management_test.lua
 
   # The formal models in spec/ (TLA+ query lifecycle, Quint client/transactions): the proposed design
   # must hold and every other variant must fail the documented way. Linux only; the models do not
@@ -193,6 +210,11 @@ jobs:
           version: stable
       - name: Start databases
         run: docker compose up -d --wait
+      - name: PostgreSQL 17 client tools
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          echo "DBBLISS_TEST_PG_BIN=/usr/lib/postgresql/17/bin" >> "$GITHUB_ENV"
       - name: Configure test connections
         run: |
           echo "DBBLISS_TEST_PG=Host=localhost;Port=55432;Username=dbbliss;Database=dbbliss" >> "$GITHUB_ENV"

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dbbliss.Backend.Catalog;
+using Dbbliss.Backend.Management;
 using Dbbliss.Backend.Sessions;
 using Dbbliss.Backend.Engines;
 using Dbbliss.Backend.Rpc;
@@ -38,7 +39,11 @@ public sealed class Backend
     /// <summary>A catalog operation (opening its session included) gets this long (settable for tests).</summary>
     public TimeSpan CatalogTimeout { get; set; } = TimeSpan.FromSeconds(60);
 
+    /// <summary>Backups and drops; its limits are settable for tests.</summary>
+    public OperationManager Operations => _operations;
+
     private readonly Output _output;
+    private readonly OperationManager _operations;
     private readonly Dictionary<string, IEngine> _engines;
     private readonly ConcurrentDictionary<string, Connection> _connections = new();
     private readonly ConcurrentDictionary<string, QueryRun> _queries = new();
@@ -55,6 +60,7 @@ public sealed class Backend
     public Backend(Output output, IEnumerable<IEngine> engines)
     {
         _output = output;
+        _operations = new OperationManager(output);
         _engines = engines.ToDictionary(e => e.Name);
         _output.Broken += () => _ = ShutdownAsync("stdout closed");
     }
@@ -172,6 +178,10 @@ public sealed class Backend
             "sessions/cancel" => new Reply(await SessionsAsync(p, TargetOf(p), CancelSessionAsync)),
             "sessions/terminate" => new Reply(await SessionsAsync(p, TargetOf(p), TerminateSessionAsync)),
             "sessions/status" => new Reply(await SessionsAsync(p, TargetOf(p), SessionStatusAsync)),
+            "backup/defaults" => new Reply(await BackupDefaultsAsync(p)),
+            "backup/start" => await StartBackupAsync(p),
+            "backup/cancel" => new Reply(new JsonObject { ["state"] = _operations.Cancel(Str(p, "backup_id")) }),
+            "management/drop" => new Reply(await DropAsync(p)),
             "transaction/begin" => await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)),
             "transaction/commit" => await TransactionAsync(p, (s, ct) => s.CommitAsync(ct)),
             "transaction/rollback" => await TransactionAsync(p, (s, ct) => s.RollbackAsync(ct)),
@@ -198,7 +208,7 @@ public sealed class Backend
         }
         var spec = new ConnectionSpec(Str(p, "connection_string"), Credentials.Resolve(p["password"]), p["options"] as JsonObject);
         var id = "c" + Interlocked.Increment(ref _nextConnection);
-        var connection = new Connection(id, engine, _output, spec);
+        var connection = new Connection(id, engine, _output, spec) { Env = NormalizeEnv(OptStr(p, "env")) };
         try
         {
             connection.Session = await engine.OpenAsync(spec, connection, CancellationToken.None);
@@ -235,6 +245,12 @@ public sealed class Backend
                 // Never decide commit-or-rollback for the user: the caller must say so.
                 throw new RpcException(RpcErrors.TransactionOpen,
                     $"The connection has an open transaction ({transaction}). Commit or roll back first, or disconnect with rollback = true.");
+            }
+            // Last, once nothing else stands in the way: from here no operation starts on the connection, and
+            // one that is running (a backup, a drop) keeps it from closing under it.
+            if (!_operations.TryBeginClose(connection.Id))
+            {
+                throw new RpcException(RpcErrors.ConnectionBusy, $"Connection {connection.Id} is running a backup or drop; wait for it or cancel it before disconnecting.");
             }
             _connections.TryRemove(connection.Id, out _);
             await connection.CloseCatalogAsync();
@@ -657,6 +673,78 @@ public sealed class Backend
         return new JsonObject { ["present"] = status.Present, ["detail"] = status.Detail };
     }
 
+    // Management: backup and drop -----------------------------------------------------------------
+
+    private static string NormalizeEnv(string? env) => env?.ToLowerInvariant() switch
+    {
+        "dev" => "dev",
+        "test" => "test",
+        _ => "prod",
+    };
+
+    private (OperationTarget Target, Connection Connection) ManagementTarget(JsonObject p)
+    {
+        var connection = GetConnection(p);
+        var management = connection.Engine.Management
+            ?? throw new RpcException(RpcErrors.InvalidParams, $"{connection.Engine.Name} has no management support yet.");
+        var target = new OperationTarget(connection.Id, new ManagementContext(connection.Engine, connection.Spec, connection.Env), management);
+        return (target, connection);
+    }
+
+    /// <summary>Runs a management step: what the user can fix is 1009, a server error is the driver's, shutdown is shutdown.</summary>
+    private static async Task<T> GuardedAsync<T>(Connection connection, Func<Task<T>> work)
+    {
+        try
+        {
+            return await work();
+        }
+        catch (ManagementException ex)
+        {
+            throw new RpcException(RpcErrors.Management, ex.Message);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new RpcException(RpcErrors.ShuttingDown, "The backend is shutting down.");
+        }
+        catch (Exception ex) when (ex is not RpcException)
+        {
+            throw DatabaseError(connection.Engine, ex);
+        }
+    }
+
+    private async Task<JsonObject> BackupDefaultsAsync(JsonObject p)
+    {
+        var (target, connection) = ManagementTarget(p);
+        var directory = await GuardedAsync(connection, () => _operations.DefaultBackupDirAsync(target, CancellationToken.None));
+        return new JsonObject { ["directory"] = directory };
+    }
+
+    private async Task<Reply> StartBackupAsync(JsonObject p)
+    {
+        var (target, connection) = ManagementTarget(p);
+        var request = new BackupRequest(Str(p, "database"), Str(p, "path"), p["overwrite"]?.GetValue<bool>() ?? false);
+        var (id, start) = await GuardedAsync(connection, () => _operations.StartBackupAsync(target, request));
+        // The backup starts after the response is written, so the client knows its id before any progress.
+        return new Reply(new JsonObject { ["backup_id"] = id }, After: start);
+    }
+
+    private static readonly string[] DropKinds = ["database", "table", "view", "function", "procedure"];
+
+    private async Task<JsonObject> DropAsync(JsonObject p)
+    {
+        var (target, connection) = ManagementTarget(p);
+        var kind = Str(p, "kind");
+        if (!DropKinds.Contains(kind)) throw new RpcException(RpcErrors.InvalidParams, $"Cannot drop a {kind}. Known: {string.Join(", ", DropKinds)}.");
+        var request = new DropRequest(kind, Str(p, "database"), OptStr(p, "schema"), Str(p, "name"), OptStr(p, "identity"));
+        var confirm = Str(p, "confirm_name");
+        await GuardedAsync(connection, async () =>
+        {
+            await _operations.DropAsync(target, request, confirm, OptStr(p, "backup_id"));
+            return true;
+        });
+        return new JsonObject { ["dropped"] = true };
+    }
+
     private static async Task<JsonObject> TransactionAsync(Connection connection, Func<IEngineSession, CancellationToken, Task> action)
     {
         try
@@ -726,6 +814,7 @@ public sealed class Backend
             {
                 Log.Warn($"{tasks.Count(t => !t.IsCompleted)} queries did not end within {ShutdownQueryWait.TotalSeconds:0} s; closing their connections.");
             }
+            await _operations.ShutdownAsync();
             foreach (var connection in _connections.Values)
             {
                 var close = Task.WhenAll(connection.CloseCatalogAsync(), connection.Session.DisposeAsync().AsTask());
@@ -827,6 +916,9 @@ public sealed class Backend
         private readonly SemaphoreSlim _busy = new(1, 1);
 
         public ConnectionSpec Spec { get; } = spec;
+
+        /// <summary>dev, test or prod, as the caller tagged the connection; anything else, or nothing, is prod.</summary>
+        public string Env { get; init; } = "prod";
 
         /// <summary>The catalog session (see CatalogAsync); guarded by <see cref="CatalogLock"/>.</summary>
         public IEngineSession? CatalogSession { get; set; }

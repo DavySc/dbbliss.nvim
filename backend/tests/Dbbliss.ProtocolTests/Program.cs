@@ -10,6 +10,9 @@ using Dbbliss.ProtocolTests;
 //
 // --verbose echoes the backend's log (stderr).
 
+// The process-runner tests start this program again as a child (ChildProcess).
+if (args.Length > 1 && args[0] == "--child") return ChildProcess.Run(args);
+
 var only = args.SkipWhile(a => a != "--test").Skip(1).FirstOrDefault()?.Split(',');
 var gate = StderrGate.Install(echo: args.Contains("--verbose"));
 
@@ -157,6 +160,76 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("sessions_lists_read_into_rows", "", SessionEngineTests.ListsAreReadIntoRows),
     // Verifies: HLR-ADM-3
     ("sessions_sqlserver_cannot_cancel_another_session", "", SessionTests.SqlServerCannotCancelAnotherSession),
+    // Verifies: HLR-MGT-1, HLR-MGT-5
+    ("backup_reports_progress_and_ends_once", "", ManagementTests.BackupReportsProgressAndEndsOnce),
+    // Verifies: HLR-MGT-5
+    ("backup_failures_are_reported", "", ManagementTests.FailuresAreReportedWithTheirReason),
+    // Verifies: HLR-MGT-6
+    ("backup_partial_file_note", "", ManagementTests.AnEngineThatCannotRemoveTheFileSaysItMayRemain),
+    // Verifies: HLR-MGT-6
+    ("backup_cancel_stops_the_operation", "", ManagementTests.CancelStopsTheOperation),
+    // Verifies: HLR-MGT-3, HLR-MGT-4
+    ("backup_refusals_come_before_anything_runs", "", ManagementTests.RefusalsComeBeforeAnythingRuns),
+    // Verifies: HLR-MGT-7, HLR-MGT-11
+    ("operations_are_exclusive_per_connection", "", ManagementTests.OperationsAreExclusivePerConnection),
+    // Verifies: HLR-MGT-7
+    ("shutdown_cancels_running_operations", "", ManagementTests.ShutdownCancelsRunningOperations),
+    // Verifies: HLR-MGT-8
+    ("drop_needs_the_typed_name", "", ManagementTests.DropNeedsTheTypedName),
+    // Verifies: HLR-MGT-9, LLR-MGT-14
+    ("prod_drop_needs_a_fresh_verified_backup", "", ManagementTests.ProdDropNeedsAFreshVerifiedBackup),
+    // Verifies: HLR-MGT-9
+    ("stale_backups_do_not_count", "", ManagementTests.StaleBackupsDoNotCount),
+    // Verifies: HLR-MGT-10
+    ("drop_errors_reach_the_user", "", ManagementTests.DropErrorsReachTheUser),
+    // Verifies: LLR-MGT-13
+    ("backup_defaults_come_from_the_engine", "", ManagementTests.BackupDefaultsComeFromTheEngine),
+    // Verifies: HLR-MGT-1, LLR-MGT-14
+    ("management_bad_requests", "", ManagementTests.BadRequests),
+    // Verifies: HLR-MGT-4
+    ("tools_are_found_where_they_are", "", ManagementEngineTests.ToolsAreFoundWhereTheyAre),
+    // Verifies: LLR-MGT-18
+    ("runner_delivers_lines_and_exit_code", "", ManagementEngineTests.RunnerDeliversLinesAndTheExitCode),
+    // Verifies: LLR-MGT-18, HLR-MGT-4
+    ("runner_passes_arguments_and_environment", "", ManagementEngineTests.RunnerPassesArgumentsAndEnvironmentUntouched),
+    // Verifies: LLR-MGT-18, HLR-MGT-6
+    ("runner_cancel_ends_the_whole_tree", "", ManagementEngineTests.RunnerCancelEndsTheWholeTree),
+    // Verifies: LLR-MGT-18
+    ("runner_reports_a_tool_that_cannot_start", "", ManagementEngineTests.RunnerReportsAToolThatCannotStart),
+    // Verifies: HLR-MGT-1, HLR-MGT-4
+    ("pg_backup_runs_pg_dump_then_lists_the_archive", "", PostgresManagementTests.BackupRunsPgDumpThenListsTheArchive),
+    // Verifies: HLR-MGT-4
+    ("pg_backup_settings_go_through_the_environment", "", PostgresManagementTests.TheToolGetsItsSettingsThroughItsEnvironment),
+    // Verifies: HLR-MGT-3, HLR-MGT-4
+    ("pg_backup_refused_before_anything_runs", "", PostgresManagementTests.BackupIsRefusedBeforeAnythingRuns),
+    // Verifies: HLR-MGT-5, HLR-MGT-6
+    ("pg_backup_failures_and_cancels_leave_no_partial_file", "", PostgresManagementTests.FailuresAndCancelsLeaveNoPartialFile),
+    // Verifies: HLR-MGT-8, HLR-MGT-10, LLR-MGT-12
+    ("pg_drop_what_the_server_named_and_nothing_more", "", PostgresManagementTests.PostgresDropsWhatTheServerNamedAndNothingMore),
+    // Verifies: LLR-MGT-13
+    ("pg_backup_file_is_on_this_machine", "", PostgresManagementTests.PostgresBackupFileIsOnThisMachine),
+    // Verifies: HLR-MGT-2, LLR-MGT-12
+    ("mssql_backup_is_copy_only_checksummed_and_verified", "", SqlServerManagementTests.BackupIsCopyOnlyChecksummedAndVerified),
+    // Verifies: HLR-MGT-5
+    ("mssql_backup_progress_follows_server_messages", "", SqlServerManagementTests.ProgressFollowsTheServersMessages),
+    // Verifies: HLR-MGT-3
+    ("mssql_backup_refused_before_anything_runs", "", SqlServerManagementTests.BackupIsRefusedBeforeAnythingRuns),
+    // Verifies: HLR-MGT-6
+    ("mssql_backup_cancel_uses_the_protocol_cancel", "", SqlServerManagementTests.CancelUsesTheProtocolCancel),
+    // Verifies: LLR-MGT-13
+    ("mssql_backup_defaults_to_the_servers_folder", "", SqlServerManagementTests.DefaultsToTheServersBackupFolder),
+    // Verifies: HLR-MGT-8, HLR-MGT-10, LLR-MGT-12
+    ("mssql_drop_what_the_server_named_and_nothing_more", "", SqlServerManagementTests.DropsWhatTheServerNamedAndNothingMore),
+    // Verifies: HLR-MGT-5
+    ("backup_unexpected_failure_is_reported", "", ManagementTests.AnUnexpectedFailureIsReportedNotLost),
+    // Verifies: HLR-MGT-7
+    ("shutdown_ends_a_running_drop", "", ManagementTests.ShutdownWaitsForARunningDropAndEndsIt),
+    // Verifies: HLR-MGT-7
+    ("shutdown_is_bounded_when_a_tool_does_not_stop", "", ManagementTests.ShutdownIsBoundedWhenAToolDoesNotStop),
+    // Verifies: HLR-MGT-7, HLR-MGT-11
+    ("operation_manager_guards_its_races", "", ManagementTests.TheManagerGuardsItsOwnRaces),
+    // Verifies: HLR-MGT-7
+    ("operation_ends_when_stdout_is_gone", "", ManagementTests.AnOperationEndsEvenWhenTheReportCannotBeWritten),
     // Verifies: HLR-SCRIPT-1
     ("script_split_rpc", "", ScriptSplitRpc),
     // Verifies: HLR-SCRIPT-3

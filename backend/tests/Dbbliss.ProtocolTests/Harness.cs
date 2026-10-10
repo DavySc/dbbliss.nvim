@@ -108,9 +108,12 @@ public sealed class Harness : IAsyncDisposable
         }
     }
 
-    public async Task<string> ConnectAsync()
+    /// <param name="env">The connection's environment tag; left out when null.</param>
+    public async Task<string> ConnectAsync(string? env = null)
     {
-        var result = await ResultAsync("connect", new JsonObject { ["engine"] = "fake", ["connection_string"] = "fake" });
+        var p = new JsonObject { ["engine"] = "fake", ["connection_string"] = "fake" };
+        if (env is not null) p["env"] = env;
+        var result = await ResultAsync("connect", p);
         return result["connection_id"]!.GetValue<string>();
     }
 

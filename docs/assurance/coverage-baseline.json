@@ -1,7 +1,7 @@
 {
  "backend/src/Dbbliss.Backend/Backend.cs": {
-  "branches": 99.57,
-  "lines": 99.37
+  "branches": 99.59,
+  "lines": 99.42
  },
  "backend/src/Dbbliss.Backend/Catalog/CatalogHelpers.cs": {
   "branches": 73.33,
@@ -41,7 +41,7 @@
  },
  "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs": {
   "branches": 83.33,
-  "lines": 87.33
+  "lines": 87.42
  },
  "backend/src/Dbbliss.Backend/Engines/QueryControl.cs": {
   "branches": 100.0,
@@ -49,7 +49,7 @@
  },
  "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs": {
   "branches": 95.56,
-  "lines": 97.04
+  "lines": 97.06
  },
  "backend/src/Dbbliss.Backend/Engines/ValueConverter.cs": {
   "branches": 100.0,
@@ -62,6 +62,26 @@
  "backend/src/Dbbliss.Backend/Log.cs": {
   "branches": 100.0,
   "lines": 81.25
+ },
+ "backend/src/Dbbliss.Backend/Management/IManagement.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Management/OperationManager.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Management/PostgresManagement.cs": {
+  "branches": 100.0,
+  "lines": 95.59
+ },
+ "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs": {
+  "branches": 97.62,
+  "lines": 96.43
+ },
+ "backend/src/Dbbliss.Backend/Management/SqlServerManagement.cs": {
+  "branches": 97.22,
+  "lines": 96.15
  },
  "backend/src/Dbbliss.Backend/Program.cs": {
   "branches": 87.5,
@@ -114,7 +134,10 @@
   "lines": 97.44
  },
  "lua/dbbliss/init.lua": {
-  "lines": 82.88
+  "lines": 83.97
+ },
+ "lua/dbbliss/management.lua": {
+  "lines": 94.09
  },
  "lua/dbbliss/names.lua": {
   "lines": 97.06
@@ -129,9 +152,9 @@
   "lines": 100.0
  },
  "lua/dbbliss/sessions.lua": {
-  "lines": 93.65
+  "lines": 97.35
  },
  "lua/dbbliss/tree.lua": {
-  "lines": 92.31
+  "lines": 92.59
  }
 }

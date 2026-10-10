@@ -70,6 +70,32 @@ public abstract class EngineProfile
     public async Task<string> ServerIdAsync(DbConnection c) =>
         Convert.ToString((await FirstRowAsync(c, ServerIdSql)).Values[0], System.Globalization.CultureInfo.InvariantCulture)!;
 
+    // ---- Phase 4: scratch databases for backup and drop ------------------------------------------
+
+    /// <summary>The connection string of this profile, pointed at another database.</summary>
+    public virtual string ScratchConnectionString(string database) => throw new NotSupportedException();
+
+    public virtual Task<DbConnection> OpenObserverAsync(string database) => throw new NotSupportedException();
+
+    /// <summary>
+    /// Creates <paramref name="database"/> afresh with bkp_probe (id, pad; <paramref name="rows"/> rows), parent and child
+    /// (a foreign key), the view v_probe, the function fn_probe and the procedure pr_probe.
+    /// </summary>
+    public virtual Task CreateScratchAsync(DbConnection observer, string database, int rows) => throw new NotSupportedException();
+
+    public virtual Task DropScratchAsync(DbConnection observer, string database) => throw new NotSupportedException();
+
+    public virtual Task<bool> DatabaseExistsAsync(DbConnection observer, string database) => throw new NotSupportedException();
+
+    /// <summary>1 when the object exists in the scratch database the connection is in.</summary>
+    public virtual string ObjectExistsSql(string name) => throw new NotSupportedException();
+
+    /// <summary>Restores the backup file into a new database and returns the row count of bkp_probe there.</summary>
+    public virtual Task<long> RestoreAndCountAsync(DbConnection observer, string backupPath, string newDatabase) => throw new NotSupportedException();
+
+    public async Task<bool> ExistsAsync(DbConnection scratch, string name) =>
+        Convert.ToInt64((await FirstRowAsync(scratch, ObjectExistsSql(name))).Values[0], System.Globalization.CultureInfo.InvariantCulture) != 0;
+
     /// <summary>A login that can see other sessions but may not signal them; null where the engine has no sessions admin.</summary>
     public virtual Task<LimitedUser?> CreateLimitedUserAsync(DbConnection observer) => Task.FromResult<LimitedUser?>(null);
 
@@ -115,6 +141,60 @@ public sealed record LimitedUser(string ConnectionString, Func<Task> DropAsync);
 
 public sealed class PostgresProfile : EngineProfile
 {
+    /// <summary>The folder with pg_dump and pg_restore when they are not on PATH (DBBLISS_TEST_PG_BIN).</summary>
+    public static string? ToolFolder => Environment.GetEnvironmentVariable("DBBLISS_TEST_PG_BIN") is { Length: > 0 } f ? f : null;
+
+    private string Tool(string name) => ToolFolder is { } f ? Path.Combine(f, OperatingSystem.IsWindows() ? name + ".exe" : name) : name;
+
+    public override string ScratchConnectionString(string database) => new NpgsqlConnectionStringBuilder(ConnectionString) { Database = database }.ConnectionString;
+
+    public override async Task<DbConnection> OpenObserverAsync(string database)
+    {
+        var b = new NpgsqlConnectionStringBuilder(ConnectionString) { Pooling = false, ApplicationName = "dbbliss-observer", Database = database };
+        if (Password.Length > 0) b.Password = Password;
+        var c = new NpgsqlConnection(b.ConnectionString);
+        await c.OpenAsync();
+        return c;
+    }
+
+    public override async Task CreateScratchAsync(DbConnection observer, string database, int rows)
+    {
+        await DropScratchAsync(observer, database);
+        await ExecAsync(observer, "CREATE DATABASE " + database);
+        await using var c = await OpenObserverAsync(database);
+        await ExecAsync(c, "CREATE TABLE bkp_probe (id int PRIMARY KEY, pad text)");
+        await ExecAsync(c, $"INSERT INTO bkp_probe SELECT g, md5(g::text) || md5((g * 7)::text) || md5((g * 13)::text) FROM generate_series(1, {rows}) g");
+        await ExecAsync(c, "CREATE TABLE parent (id int PRIMARY KEY)");
+        await ExecAsync(c, "CREATE TABLE child (id int PRIMARY KEY, parent_id int NOT NULL REFERENCES parent(id))");
+        await ExecAsync(c, "CREATE VIEW v_probe AS SELECT id FROM bkp_probe");
+        await ExecAsync(c, "CREATE FUNCTION fn_probe(a integer) RETURNS integer LANGUAGE sql AS $$ SELECT a + 1 $$");
+        await ExecAsync(c, "CREATE PROCEDURE pr_probe() LANGUAGE sql AS $$ SELECT 1 $$");
+    }
+
+    public override Task DropScratchAsync(DbConnection observer, string database) => ExecAsync(observer, $"DROP DATABASE IF EXISTS {database} WITH (FORCE)");
+
+    public override async Task<bool> DatabaseExistsAsync(DbConnection observer, string database) =>
+        Convert.ToInt64((await FirstRowAsync(observer, "SELECT count(*) FROM pg_database WHERE datname = @d", ("d", database))).Values[0], System.Globalization.CultureInfo.InvariantCulture) != 0;
+
+    public override string ObjectExistsSql(string name) =>
+        $"SELECT (to_regclass('public.{name}') IS NOT NULL OR EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace s ON s.oid = p.pronamespace WHERE s.nspname = 'public' AND p.proname = '{name}'))::int";
+
+    public override async Task<long> RestoreAndCountAsync(DbConnection observer, string backupPath, string newDatabase)
+    {
+        await DropScratchAsync(observer, newDatabase);
+        await ExecAsync(observer, "CREATE DATABASE " + newDatabase);
+        var b = new NpgsqlConnectionStringBuilder(ConnectionString);
+        var psi = new System.Diagnostics.ProcessStartInfo(Tool("pg_restore")) { RedirectStandardError = true, RedirectStandardOutput = true, UseShellExecute = false };
+        foreach (var a in new[] { "--no-owner", "--no-password", "--host=" + b.Host, "--port=" + b.Port, "--username=" + b.Username, "--dbname=" + newDatabase, backupPath }) psi.ArgumentList.Add(a);
+        if (Password.Length > 0) psi.Environment["PGPASSWORD"] = Password;
+        using var p = System.Diagnostics.Process.Start(psi)!;
+        var err = await p.StandardError.ReadToEndAsync();
+        await p.WaitForExitAsync();
+        if (p.ExitCode != 0) throw new InvalidOperationException("pg_restore: " + err);
+        await using var c = await OpenObserverAsync(newDatabase);
+        return await CountAsync(c, "bkp_probe");
+    }
+
     public override string ServerIdSql => "SELECT pg_backend_pid()";
 
     public override async Task<LimitedUser?> CreateLimitedUserAsync(DbConnection observer)
@@ -221,6 +301,55 @@ public sealed class PostgresProfile : EngineProfile
 
 public sealed class SqlServerProfile : EngineProfile
 {
+    public override string ScratchConnectionString(string database) => new SqlConnectionStringBuilder(ConnectionString) { InitialCatalog = database }.ConnectionString;
+
+    public override async Task<DbConnection> OpenObserverAsync(string database)
+    {
+        var c = await OpenObserverAsync();
+        c.ChangeDatabase(database);
+        return c;
+    }
+
+    public override async Task CreateScratchAsync(DbConnection observer, string database, int rows)
+    {
+        await DropScratchAsync(observer, database);
+        await ExecAsync(observer, "CREATE DATABASE " + database);
+        await using var c = await OpenObserverAsync(database);
+        await ExecAsync(c, "CREATE TABLE dbo.bkp_probe (id int NOT NULL PRIMARY KEY, pad varchar(200))");
+        await ExecAsync(c, $"INSERT INTO dbo.bkp_probe SELECT TOP ({rows}) ROW_NUMBER() OVER (ORDER BY (SELECT 1)), REPLICATE(CONVERT(varchar(36), NEWID()), 5) FROM sys.all_columns a CROSS JOIN sys.all_columns b");
+        await ExecAsync(c, "CREATE TABLE dbo.parent (id int NOT NULL PRIMARY KEY)");
+        await ExecAsync(c, "CREATE TABLE dbo.child (id int NOT NULL PRIMARY KEY, parent_id int NOT NULL REFERENCES dbo.parent(id))");
+        await ExecAsync(c, "CREATE VIEW dbo.v_probe AS SELECT id FROM dbo.bkp_probe");
+        await ExecAsync(c, "CREATE FUNCTION dbo.fn_probe(@a int) RETURNS int AS BEGIN RETURN @a + 1 END");
+        await ExecAsync(c, "CREATE PROCEDURE dbo.pr_probe AS SELECT 1");
+    }
+
+    public override Task DropScratchAsync(DbConnection observer, string database) => ExecAsync(observer,
+        $"USE master; IF DB_ID('{database}') IS NOT NULL BEGIN ALTER DATABASE {database} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE {database}; END");
+
+    public override async Task<bool> DatabaseExistsAsync(DbConnection observer, string database) =>
+        Convert.ToInt64((await FirstRowAsync(observer, "SELECT count(*) FROM sys.databases WHERE name = @d", ("@d", database))).Values[0], System.Globalization.CultureInfo.InvariantCulture) != 0;
+
+    public override string ObjectExistsSql(string name) => $"SELECT CASE WHEN OBJECT_ID(N'dbo.{name}') IS NULL THEN 0 ELSE 1 END";
+
+    public override async Task<long> RestoreAndCountAsync(DbConnection observer, string backupPath, string newDatabase)
+    {
+        await DropScratchAsync(observer, newDatabase);
+        var p = backupPath.Replace("'", "''", StringComparison.Ordinal);
+        var dataDir = Convert.ToString((await FirstRowAsync(observer, "SELECT CAST(SERVERPROPERTY('InstanceDefaultDataPath') AS nvarchar(512))")).Values[0], System.Globalization.CultureInfo.InvariantCulture)!;
+        var files = new List<(string Logical, string Physical)>();
+        await using (var cmd = observer.CreateCommand())
+        {
+            cmd.CommandText = $"RESTORE FILELISTONLY FROM DISK = N'{p}'";
+            await using var r = await cmd.ExecuteReaderAsync();
+            while (await r.ReadAsync()) files.Add((r.GetString(0), r.GetString(1)));
+        }
+        var sep = dataDir.Contains('\\', StringComparison.Ordinal) ? "\\" : "/";
+        var moves = string.Join(", ", files.Select((f, i) => $"MOVE N'{f.Logical.Replace("'", "''", StringComparison.Ordinal)}' TO N'{dataDir.TrimEnd('/', '\\')}{sep}{newDatabase}_{i}{Path.GetExtension(f.Physical)}'"));
+        await ExecAsync(observer, $"RESTORE DATABASE {newDatabase} FROM DISK = N'{p}' WITH {moves}, REPLACE");
+        return await CountAsync(observer, newDatabase + ".dbo.bkp_probe");
+    }
+
     public override string ServerIdSql => "SELECT @@SPID";
 
     public override async Task<LimitedUser?> CreateLimitedUserAsync(DbConnection observer)

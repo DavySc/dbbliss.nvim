@@ -135,6 +135,42 @@
    "kind": "branch",
    "category": "unreachable",
    "reason": "The -1 arm (an uncommittable transaction) is never taken: SQL Server rolls such a transaction back at the end of the batch, before the state is read (see the entry for -1 below)."
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Management/PostgresManagement.cs",
+   "match": "Log.Warn($\"could not remove the partial backup",
+   "before": 2,
+   "after": 1,
+   "kind": "line",
+   "reason": "Cleanup of a partial file that fails (the file is locked, the folder is read-only) after the backup already failed or was cancelled: the original error is what the user needs and is thrown right after; the Warn only records that the cleanup failed. Needs a file the process may create but not delete, which the test user (root on a developer's container, an ordinary user in CI, Windows) does not give the same way everywhere.",
+   "category": "defensive"
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Management/SqlServerManagement.cs",
+   "match": "public ValueTask ResultSetAsync(int index, IReadOnlyList<ColumnInfo> columns)",
+   "before": 0,
+   "after": 2,
+   "kind": "line",
+   "reason": "BACKUP DATABASE and RESTORE VERIFYONLY return no result set (their output is messages), so the sink that discards rows is never called; it exists because ExecuteAsync needs a sink.",
+   "category": "unreachable"
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs",
+   "match": "catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)",
+   "before": 0,
+   "after": 2,
+   "kind": "line",
+   "reason": "Kill of a process that ended between the cancel and the kill: a race of a few microseconds that a test cannot provoke on purpose; the catch only makes it harmless.",
+   "category": "defensive"
+  },
+  {
+   "file": "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs",
+   "match": "var names = OperatingSystem.IsWindows() ? new[] { tool + \".exe\" } : [tool];",
+   "before": 0,
+   "after": 0,
+   "kind": "branch",
+   "reason": "Which executable name to look for depends on the operating system; the other side runs on the other platform's CI job (tools_are_found_where_they_are, cancel suite).",
+   "category": "platform"
   }
  ]
 }

@@ -14,6 +14,8 @@ public sealed class Db2iEngine : IEngine
 
     public Sessions.ISessionAdmin? Sessions => null;
 
+    public Management.IManagement? Management => null;
+
     public async Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct)
     {
         var cs = spec.ConnectionString;

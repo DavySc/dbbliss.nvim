@@ -331,6 +331,107 @@ is sent when the user declines. Source: phase 3 plan; decision 49.
 `:Dbbliss sessions` shall open the sessions buffer for the current connection and complete.
 Source: phase 3 plan.
 
+## Management (Phase 4)
+
+### HLR-MGT-1
+`backup/start` on PostgreSQL shall run `pg_dump` in custom format into the given file and then
+verify the file with `pg_restore --list`. The backup is reported `completed` only when both end with
+exit code 0 and the file exists. The result names the file, its size and the tool versions used.
+Source: phase 4 plan; decisions 51, 52.
+
+### HLR-MGT-2
+`backup/start` on SQL Server shall run `BACKUP DATABASE ... WITH COPY_ONLY, CHECKSUM` and then
+`RESTORE VERIFYONLY ... WITH CHECKSUM`, on a session of its own; the path is on the server's file
+system. `COPY_ONLY` leaves the backup chain of the database untouched. Source: phase 4 plan;
+decision 53.
+
+### HLR-MGT-3
+A backup shall not overwrite an existing file unless `overwrite = true`; the refusal (code 1009)
+comes before anything runs. Source: priorities (no surprise damage); decision 54.
+
+### HLR-MGT-4
+`pg_dump` shall be found at `options.pg_dump` (a file, or the directory holding it) or on `PATH`
+(`.exe` on Windows), and `pg_restore` next to it or on `PATH`; a tool that cannot be found is a
+user-fixable error (1009) that says where it looked. The password shall reach the tool only through
+its environment, never its command line or the log. Source: phase 4 plan; decision 52.
+
+### HLR-MGT-5
+An operation shall report its progress (`backup/progress`: phase, text, percent when known) and end
+with exactly one `backup/done` (`completed`, `failed` or `cancelled`) that carries the reason on
+failure: the tool's exit code and the end of its error output. No failure is silent. Source:
+priorities; phase 4 plan.
+
+### HLR-MGT-6
+`backup/cancel` shall stop the operation (the tool's whole process tree; or the protocol-level cancel
+of the BACKUP statement) and report `cancelled`. A partial file on this machine (PostgreSQL) is
+removed. SQL Server's file is on the server, where the backend cannot remove what a cancelled or
+failed BACKUP began: `backup/done` then says the file may remain, naming it. A cancelled or failed
+backup is never reported verified and never counts for HLR-MGT-9. Source: priorities; HLR-CANCEL-1;
+decision 55.
+
+### HLR-MGT-7
+Disconnect shall be refused (`connection_busy`) while an operation of the connection runs. Shutdown
+shall cancel running operations and wait, bounded, for the tool to end; no tool process outlives the
+backend. Verified by model (`spec/tla/Operations.tla`: `NoOrphanTool`, `NoOpOnClosedConn`) and tests.
+Source: priorities; decision 55.
+
+### HLR-MGT-8
+`management/drop` shall drop a table, view, function, procedure or database only when `confirm_name`
+equals the object's name exactly; otherwise it is refused (1009) and nothing is sent. It never
+uses CASCADE, and runs on a session of its own, not inside the user's transaction. Source: phase 4
+plan; decisions 56, 57.
+
+### HLR-MGT-9
+When the connection's `env` is `prod`, or not given, a drop shall require the `backup_id` of a
+verified backup of the same database made by this backend process within the last 30 minutes;
+without it the drop is refused (1009). Other environments may drop without a backup. Verified by
+model (`ProdDropBacked`) and tests. Source: phase 4 plan; decision 58.
+
+### HLR-MGT-10
+A drop the server refuses (database in use, objects depending on it, no permission) shall reach the
+user as the server's error, and nothing shall be forced: no CASCADE, no kicking other sessions out.
+Source: priorities; decision 57.
+
+### HLR-MGT-11
+A backup or drop shall be refused (`connection_busy`) while another operation of the same connection
+runs. Verified by model (`NoDropDuringOp`) and tests. Source: decision 55.
+
+### LLR-MGT-12
+The name of an object in a `DROP` statement shall be the one the server resolves and quotes itself
+(`regclass`, `regprocedure`, `quote_ident`, `QUOTENAME`), found by schema and name passed as parameters;
+the only names written into statements by the backend are a bracketed database name (`]` doubled) and
+string literals (`'` doubled). So a name cannot end the statement it is in. A kind that does not
+match what the server found (a view asked for as a table) is refused. Source: decision 56.
+
+### LLR-MGT-13
+`backup/defaults` shall return the server's default backup directory for SQL Server and nothing for
+PostgreSQL, whose file is on the machine of the plugin. Source: decision 53.
+
+### LLR-MGT-14
+`connect` shall take the connection's `env` (dev, test, prod); a missing or unknown value shall be
+treated as prod by management operations. The plugin sends the connection's tag. Source: decision 58.
+
+### LLR-MGT-15
+The progress window shall be a floating window that shows each phase and its percent as lines, the
+final status, and the error text on failure (also as an error notification); it stays until closed
+with `q`, and `c` cancels the running operation. Source: phase 4 plan; decision 59.
+
+### LLR-MGT-16
+`:Dbbliss drop` shall ask the user to type the object's name and send nothing for any other input;
+shall offer a backup first (default yes), and on a prod connection shall run one first and not drop
+when it did not complete. Source: phase 4 plan; decisions 58, 59.
+
+### LLR-MGT-17
+`:Dbbliss backup [path]` shall dispatch and complete, naming the connection's database from its
+connection string; the schema tree shall drop the database or object under the cursor with `D`
+(`:Dbbliss drop` is the same from inside the tree and says how from anywhere else). Source: phase 4
+plan.
+
+### LLR-MGT-18
+The process runner shall deliver output lines as they arrive, keep the end of the error output, end
+the whole process tree on cancel, and report a missing executable as an error, not a crash. Source:
+HLR-MGT-5, HLR-MGT-6.
+
 ## Client interface
 
 ### HLR-UI-1

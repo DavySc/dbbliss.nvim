@@ -158,6 +158,37 @@ connection it says PROD in the question and on the button.
 - The list is read on the connection's catalog session, so it works while your own query is running,
   paused, or in an aborted transaction.
 
+### Backup and drop
+
+| Command | |
+|---|---|
+| `:Dbbliss backup [path]` | back up the connection's database to a file, verify it, and show progress in a floating window |
+| `D` in the schema tree | drop the database, table, view, function or procedure under the cursor |
+
+**Backup.** PostgreSQL runs `pg_dump` (custom format) on this machine, then checks the file with
+`pg_restore --list`; the file is on this machine. SQL Server runs `BACKUP DATABASE ... WITH COPY_ONLY,
+CHECKSUM` and then `RESTORE VERIFYONLY ... WITH CHECKSUM`; the file is on the **server** (the prompt
+starts at the server's default backup folder). A backup is reported `completed` only after both steps
+passed, and it never overwrites a file that is there unless you say so. In the window: `c` cancels
+(the tool and everything it started are ended; a partial file on this machine is removed), `q` closes.
+Closing the plugin's backend, or Neovim, cancels a running backup too.
+
+`pg_dump` and `pg_restore` are taken from `options.pg_dump` (a file, or the folder that holds it) or
+from `PATH`; `pg_dump` refuses a server newer than itself, so use the tools of the server's version.
+The password reaches them through their environment, never their command line.
+
+```lua
+connections = { main = { engine = 'postgres', env = 'prod', connection_string = '...',
+                         options = { pg_dump = [[C:\Program Files\PostgreSQL\17\bin]] } } }
+```
+
+**Drop.** You type the object's name to confirm; anything else drops nothing. A backup is offered first
+(default yes). On a connection tagged `prod`, **or not tagged at all**, a backup of the same database is
+made first and the drop only goes ahead when it completed (and not more than 30 minutes ago). The
+backup is of the whole database, also when you drop one table. Nothing is forced: no `CASCADE`, and a
+database with sessions in it is not dropped (end them from `:Dbbliss sessions`); the server's refusal is
+shown as it is.
+
 ### Results
 
 Results go to the `dbbliss://results` buffer as aligned tables (column widths from the first rows,

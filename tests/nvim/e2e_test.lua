@@ -17,6 +17,7 @@ local dbbliss = require('dbbliss')
 local results = require('dbbliss.results')
 local tree = require('dbbliss.tree')
 local sessions = require('dbbliss.sessions')
+local management = require('dbbliss.management')
 vim.notify = function() end
 
 dbbliss.setup({
@@ -30,6 +31,8 @@ dbbliss.setup({
         or (env.DBBLISS_E2E_CREDMAN and { credman = env.DBBLISS_E2E_CREDMAN })
         or (env.DBBLISS_E2E_PASS and { pass = env.DBBLISS_E2E_PASS })
         or nil,
+      options = env.DBBLISS_TEST_PG_BIN and { pg_dump = env.DBBLISS_TEST_PG_BIN } or nil,
+      env = 'dev',
     },
   },
 })
@@ -347,6 +350,51 @@ local steps = {
       vim.fn.confirm = confirm
       expect(not asked, 'terminating the connection\'s own session was offered')
       vim.cmd('bwipeout!')
+    end,
+  },
+  {
+    -- Verifies: LLR-MGT-15, HLR-MGT-1, HLR-MGT-2
+    'backup_through_the_plugin',
+    function()
+      local conn = assert(dbbliss._state.connections.db, 'no connection')
+      local path, database
+      if pg then
+        path = vim.fn.tempname() .. '.dump'
+        database = dbbliss._database_of(env.DBBLISS_E2E_CS)
+      else
+        local dir
+        dbbliss._catalog_request(conn.id, 'backup/defaults', {}, function(_, result)
+          dir = result.directory
+        end)
+        wait('the default backup folder', function()
+          return dir ~= nil
+        end)
+        path = dir:gsub('[/\\]+$', '') .. (dir:find('\\', 1, true) and '\\' or '/') .. 'dbbliss_e2e.bak'
+        database = 'master'
+      end
+      local done
+      management.backup({
+        conn_id = conn.id, conn_name = 'db', engine = engine, env = 'dev', database = database, path = path, overwrite = true,
+        on_done = function(p)
+          done = p
+        end,
+      })
+      wait('the backup to end', function()
+        return done ~= nil
+      end, 120000)
+      expect(done.status == 'completed' and done.verified, 'the backup did not complete: ' .. vim.inspect(done))
+      local shown
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_get_config(win).relative ~= '' then
+          shown = table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(win), 0, -1, false), '\n')
+          vim.api.nvim_win_close(win, true)
+        end
+      end
+      expect(shown and shown:find('completed', 1, true) and shown:find('verified', 1, true), 'the window shows the result: ' .. tostring(shown))
+      if pg then
+        expect(vim.uv.fs_stat(path).size > 0, 'the file is empty')
+        os.remove(path)
+      end
     end,
   },
   {

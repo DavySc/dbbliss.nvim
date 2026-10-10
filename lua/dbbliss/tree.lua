@@ -27,6 +27,8 @@ local deps = {
   --- called with (conn_id, conn_name, node) for the object under the cursor
   info = nil, ---@type fun(conn_id: string, conn_name: string, node: dbbliss.TreeNode)?
   script = nil, ---@type fun(conn_id: string, conn_name: string, node: dbbliss.TreeNode)?
+  --- called with (conn_id, conn_name, node) to drop the object or database under the cursor
+  drop = nil, ---@type fun(conn_id: string, conn_name: string, node: dbbliss.TreeNode)?
   notify = function(msg, level)
     vim.notify('dbbliss: ' .. msg, level)
   end,
@@ -51,6 +53,7 @@ function M.setup(opts)
 end
 
 local OBJECT_KINDS = { table = true, view = true, ['function'] = true, procedure = true }
+local DROP_KINDS = vim.tbl_extend('force', OBJECT_KINDS, { database = true })
 
 local function valid(buf)
   return buf ~= nil and vim.api.nvim_buf_is_valid(buf)
@@ -237,6 +240,7 @@ local function buffer()
   map('r', M.refresh, 'refresh this node')
   map('R', M.refresh_all, 'refresh everything')
   map('S', M.toggle_system, 'show or hide system databases and schemas')
+  map('D', M.drop, 'drop the object or database (asks for its name)')
   map('q', function()
     for _, win in ipairs(vim.fn.win_findbuf(buf)) do
       pcall(vim.api.nvim_win_close, win, true)
@@ -340,6 +344,17 @@ end
 
 function M.script()
   object_action(deps.script, 'script')
+end
+
+function M.drop()
+  local node = node_at_cursor()
+  if not node or not DROP_KINDS[node.kind] then
+    deps.notify('drop: put the cursor on a database, table, view, function or procedure', vim.log.levels.INFO)
+    return
+  end
+  if deps.drop then
+    deps.drop(S.current, S.trees[S.current].name, node)
+  end
 end
 
 local function key_of(n)

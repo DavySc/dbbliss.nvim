@@ -138,6 +138,12 @@ public sealed class BackendClient : IAsyncDisposable
         }
     }
 
+    /// <summary>The notifications received so far that match, in the order they arrived.</summary>
+    public IReadOnlyList<JsonObject> Notifications(Func<JsonObject, bool> predicate)
+    {
+        lock (_notifications) return [.. _notifications.Where(predicate)];
+    }
+
     public Task<JsonObject> WaitDoneAsync(string queryId, int timeoutMs) =>
         WaitNotificationAsync(n => n["method"]?.GetValue<string>() == "query/done"
             && n["params"]?["query_id"]?.GetValue<string>() == queryId, timeoutMs);

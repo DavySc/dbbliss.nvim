@@ -1,5 +1,6 @@
 using System.Globalization;
 using Dbbliss.Backend.Catalog;
+using Dbbliss.Backend.Management;
 using Dbbliss.Backend.Sessions;
 using Npgsql;
 
@@ -24,6 +25,8 @@ public sealed class PostgresEngine(Instances instances) : IEngine
     public ICatalog? Catalog { get; } = new PostgresCatalog();
 
     public ISessionAdmin? Sessions { get; } = new PostgresSessions();
+
+    public IManagement? Management { get; } = new PostgresManagement(ProcessRunner.Default);
 
     public async Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct)
     {

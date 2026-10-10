@@ -41,6 +41,17 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
             // Verifies: HLR-ADM-7
             if (profile.Engine == "sqlserver") yield return ("sessions_rollback_progress", SessionsRollbackProgress);
         }
+        if (profile.Engine is "postgres" or "sqlserver")
+        {
+            // Verifies: HLR-MGT-1, HLR-MGT-2, HLR-MGT-3, HLR-MGT-5
+            yield return ("backup_restore_round_trip", BackupRestoreRoundTrip);
+            // Verifies: HLR-MGT-6, HLR-MGT-7, HLR-MGT-11
+            yield return ("backup_cancel_and_shutdown", BackupCancelAndShutdown);
+            // Verifies: HLR-MGT-3, HLR-MGT-4
+            yield return ("backup_refusals", BackupRefusals);
+            // Verifies: HLR-MGT-8, HLR-MGT-9, HLR-MGT-10, LLR-MGT-12
+            yield return ("drop_objects_and_databases", DropObjectsAndDatabases);
+        }
         // Verifies: HLR-SCRIPT-3
         yield return ("error_line_in_buffer", ErrorLineInBuffer);
         // Verifies: HLR-CANCEL-6, HLR-CANCEL-2
@@ -106,9 +117,14 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
     private ScenarioResult Result(string scenario, Outcome o, string detail, long? stopMs = null) =>
         new(profile.Engine, scenario, o, detail, stopMs);
 
-    private async Task<(BackendClient Client, string ConnectionId, string Session)> StartAsync(JsonObject? options = null, string? stateDir = null, string? connectionString = null, bool passwordFromEnv = true)
+    private async Task<(BackendClient Client, string ConnectionId, string Session)> StartAsync(JsonObject? options = null, string? stateDir = null, string? connectionString = null, bool passwordFromEnv = true, string? tag = "dev")
     {
         var env = BackendEnv;
+        if (profile.Engine == "postgres" && PostgresProfile.ToolFolder is { } tools)
+        {
+            options = options is null ? [] : (JsonObject)options.DeepClone();
+            options["pg_dump"] ??= tools;
+        }
         if (stateDir is not null) env["DBBLISS_STATE_DIR"] = stateDir;
         var client = BackendClient.Start(settings.BackendPath, env);
         await client.RequestAsync("initialize");
@@ -119,6 +135,7 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
             // No password env set: integrated auth (e.g. SQL Server Express on the Windows CI runner).
             ["password"] = !passwordFromEnv || string.IsNullOrEmpty(Environment.GetEnvironmentVariable(profile.PasswordEnv)) ? null : new JsonObject { ["env"] = profile.PasswordEnv },
             ["options"] = options,
+            ["env"] = tag,
         });
         return (client, conn["connection_id"]!.GetValue<string>(), conn["server_session_id"]!.GetValue<string>());
     }

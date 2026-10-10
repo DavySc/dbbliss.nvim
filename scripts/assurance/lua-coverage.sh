@@ -22,6 +22,7 @@ run tests/nvim/client_test.lua
 run tests/nvim/results_test.lua
 run tests/nvim/catalog_test.lua
 run tests/nvim/sessions_test.lua
+run tests/nvim/management_test.lua
 if [ -n "${DBBLISS_E2E_ENGINE:-}" ]; then run tests/nvim/e2e_test.lua; fi
 
 cat > "$out/luacov.config.lua" <<LUA
