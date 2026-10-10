@@ -67,6 +67,7 @@ part without downloading `tla2tools.jar`, point `TLA_JAR` at Apalache's jar
 
 ## Assurance (Level B-like, see `docs/assurance/plan.md`)
 
+- **New features are spec/test driven**: requirement (and `spec/` model for concurrency/transactions) first, then a failing tagged test, then the code, then a mutation check. See `docs/assurance/plan.md` (Maintaining this).
 - New behaviour = a requirement in `docs/assurance/requirements.md` (new ID) + a test tagged
   `Verifies: <ID>` in the same commit. `python3 scripts/assurance/trace.py --check` must stay clean;
   it also regenerates `traceability.md` (run it without `--check`).

@@ -197,6 +197,13 @@ These are open on purpose and listed so that nobody mistakes the evidence for mo
 
 ## Maintaining this
 
+New features are developed specification-first. In order: (1) the requirement in
+`docs/assurance/requirements.md` (new ID); for a design involving concurrency or transactions, the
+`spec/` models are extended and `spec/check.sh` passes first (every variant except `Proposed` must
+fail); (2) a `Verifies:`-tagged test, run and seen to fail; (3) the code; (4) a mutation check (break
+the code once, watch the test fail); (5) trace and coverage gates clean. A defect fix also gets a
+problem-report entry and a test that failed first.
+
 A change that adds behaviour adds a requirement and a tagged test in the same commit, keeps
 `trace.py --check` clean, and either keeps critical-file coverage justified or adds the test.
 `docs/assurance/reviews/review-checklist.md` is the checklist for that review.
