@@ -56,6 +56,12 @@ def main():
         for m in reg["mutations"]:
             print(f"{m['id']:5} {m['file']}: {m['why']}")
         return 0
+    # The tests run from the build output: build every runner that is used once, so a clean checkout works.
+    for name in sorted({m.get("runner", "protocol") for m in reg["mutations"] if not wanted or m["id"] in wanted}):
+        code, out = run(reg["runners"][name]["build"])
+        if code != 0:
+            print(f"ERROR: the initial build of runner {name} failed\n{out[-800:]}", file=sys.stderr)
+            return 1
     for m in reg["mutations"]:
         if wanted and m["id"] not in wanted:
             continue
