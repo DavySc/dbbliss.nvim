@@ -112,6 +112,7 @@ jobs:
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/catalog_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/sessions_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/management_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/plan_test.lua
 
       - name: End-to-end through the plugin (both engines)
         shell: bash
@@ -153,6 +154,7 @@ jobs:
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/catalog_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/sessions_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/management_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/plan_test.lua
 
   # The formal models in spec/ (TLA+ query lifecycle, Quint client/transactions): the proposed design
   # must hold and every other variant must fail the documented way. Linux only; the models do not
@@ -207,9 +209,16 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
+      - uses: rhysd/action-setup-vim@v1
+        id: vim
+        with:
+          neovim: true
+          version: stable
       - name: Self-test of the runner
         run: python3 scripts/assurance/tests/test_mutate.py
       - name: Replay the mutations
+        env:
+          NVIM: ${{ steps.vim.outputs.executable }}
         run: python3 scripts/assurance/mutate.py
 
   # Verification evidence, DO-178C style (docs/assurance/plan.md): requirements-to-test traceability

@@ -32,9 +32,9 @@ PROTOCOL = """var tests = new (string Name, string Bug, Func<Task> Run)[]
 """
 LUA = "local names = {\n  'lua_one',\n}\n"
 LUA_TAGGED = "local names = {\n  -- Verifies: HLR-A-1\n  'lua_one',\n}\n"
-CI = "\n".join(f"nvim -l tests/nvim/{n}_test.lua" for n in ("client", "results", "catalog", "sessions", "management") for _ in range(2))
+CI = "\n".join(f"nvim -l tests/nvim/{n}_test.lua" for n in ("client", "results", "catalog", "sessions", "management", "plan") for _ in range(2))
 CI += "\nnvim -l tests/nvim/e2e_test.lua\nnvim -l tests/nvim/e2e_test.lua\n"
-COV = "\n".join(f"run tests/nvim/{n}_test.lua" for n in ("client", "results", "catalog", "sessions", "management", "e2e")) + "\n"
+COV = "\n".join(f"run tests/nvim/{n}_test.lua" for n in ("client", "results", "catalog", "sessions", "management", "plan", "e2e")) + "\n"
 
 
 class Repo:
@@ -44,7 +44,7 @@ class Repo:
         self.write("docs/assurance/requirements.md", REQS)
         self.write("backend/tests/Dbbliss.ProtocolTests/Program.cs", PROTOCOL)
         self.write("backend/tests/Dbbliss.CancelTests/Scenarios.cs", "")
-        for n in ("client", "results", "catalog", "sessions", "management", "e2e"):
+        for n in ("client", "results", "catalog", "sessions", "management", "plan", "e2e"):
             self.write(f"tests/nvim/{n}_test.lua", "")
         self.write("tests/nvim/client_test.lua", LUA_TAGGED)
         self.write(".github/workflows/ci.yml", CI)
@@ -99,8 +99,8 @@ class TraceTests(unittest.TestCase):
         self.fails_with("HLR-A-1 states no `Source:` or `Method:`")
 
     def test_unregistered_lua_suite(self):
-        self.repo.write("tests/nvim/plan_test.lua", "")
-        self.fails_with("plan_test.lua is not registered")
+        self.repo.write("tests/nvim/completion_test.lua", "")
+        self.fails_with("completion_test.lua is not registered")
 
     def test_lua_suite_missing_from_ci(self):
         self.repo.write(".github/workflows/ci.yml", CI.replace("tests/nvim/sessions_test.lua", "x"))

@@ -60,7 +60,7 @@ end
 
 local function wait(what, cond, timeout)
   if not vim.wait(timeout or 20000, cond, 20) then
-    error('timed out waiting for ' .. what .. '\n' .. excerpt(), 0)
+    error('timed out waiting for ' .. what .. '\n' .. excerpt() .. '\n-- schema tree --\n' .. table.concat(tree.lines(), '\n'), 0)
   end
 end
 
@@ -394,6 +394,79 @@ local steps = {
       if pg then
         expect(vim.uv.fs_stat(path).size > 0, 'the file is empty')
         os.remove(path)
+      end
+    end,
+  },
+  {
+    -- Verifies: LLR-PLAN-11, LLR-PLAN-12
+    'plan_viewer_through_the_plugin',
+    function()
+      local t = pg and 'e2e_plan_t' or 'dbo.e2e_plan_t'
+      local function sql(statement)
+        buffer({ statement })
+        dbbliss.run('buffer')
+        wait('the statement', idle)
+      end
+      local function count()
+        sql('select count(*) as n from ' .. t)
+        return tonumber(text():match('(%d+)%s*\n%s*%(1 row%)')) or tonumber(text():match('\n%s*(%d+)%s*\n'))
+      end
+      local function viewer()
+        for _, b in ipairs(vim.api.nvim_list_bufs()) do
+          if vim.bo[b].filetype == 'dbbliss-plan' then
+            return table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), '\n')
+          end
+        end
+        return ''
+      end
+      local function wipe()
+        for _, b in ipairs(vim.api.nvim_list_bufs()) do
+          if vim.bo[b].filetype == 'dbbliss-plan' then
+            pcall(vim.api.nvim_buf_delete, b, { force = true })
+          end
+        end
+      end
+      sql(pg and 'drop table if exists e2e_plan_t' or "if object_id('dbo.e2e_plan_t') is not null drop table dbo.e2e_plan_t")
+      sql(pg and 'create table e2e_plan_t as select g as id from generate_series(1, 50) g'
+        or 'select top 50 row_number() over (order by (select 1)) as id into dbo.e2e_plan_t from sys.all_objects')
+      local ok, err = pcall(function()
+        expect(count() == 50, 'the fixture has 50 rows')
+        local asked = 0
+        local confirm = vim.fn.confirm
+        vim.fn.confirm = function()
+          asked = asked + 1
+          return asked == 2 and 2 or 1 -- the second question is answered No
+        end
+        local function plan_of(mode, statement)
+          wipe()
+          buffer({ statement })
+          dbbliss.plan(mode, 'statement')
+          wait('the plan', function()
+            local v = viewer()
+            return v ~= '' and not v:find('Running', 1, true)
+          end)
+          return viewer()
+        end
+        local estimated = plan_of('estimated', 'select * from ' .. t .. ' where id < 10')
+        expect(estimated:find('estimated', 1, true) and estimated:find('cost', 1, true) and estimated:find('hottest', 1, true), 'estimated plan:\n' .. estimated)
+        local actual = plan_of('actual', 'select * from ' .. t .. ' where id < 10')
+        expect(actual:find('actual', 1, true) and actual:find('rows', 1, true) and actual:find('ms', 1, true), 'actual plan of a read:\n' .. actual)
+        expect(asked == 0, 'a read is not asked about')
+        local deleted = plan_of('actual', 'delete from ' .. t)
+        expect(asked == 1 and deleted:find('actual', 1, true), 'a write is asked about once, and planned after Yes:\n' .. deleted)
+        expect(count() == 50, 'the delete was rolled back: all 50 rows are still there')
+        wipe()
+        buffer({ 'delete from ' .. t })
+        dbbliss.plan('actual', 'statement')
+        vim.wait(500)
+        expect(asked == 2 and viewer() == '', 'No sends nothing and opens nothing')
+        expect(count() == 50, 'still 50 rows')
+        vim.fn.confirm = confirm
+      end)
+      sql(pg and 'drop table if exists e2e_plan_t' or "if object_id('dbo.e2e_plan_t') is not null drop table dbo.e2e_plan_t")
+      wipe()
+      if not ok then
+        error(err, 0)
       end
     end,
   },

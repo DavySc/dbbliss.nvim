@@ -1,22 +1,54 @@
 {
-  "build": [
-    "dotnet",
-    "build",
-    "backend/tests/Dbbliss.ProtocolTests",
-    "-v",
-    "q",
-    "--nologo"
-  ],
-  "test": [
-    "dotnet",
-    "run",
-    "--no-build",
-    "--project",
-    "backend/tests/Dbbliss.ProtocolTests",
-    "--",
-    "--test",
-    "{tests}"
-  ],
+  "runners": {
+    "protocol": {
+      "build": [
+        "dotnet",
+        "build",
+        "backend/tests/Dbbliss.ProtocolTests",
+        "-v",
+        "q",
+        "--nologo"
+      ],
+      "test": [
+        "dotnet",
+        "run",
+        "--no-build",
+        "--project",
+        "backend/tests/Dbbliss.ProtocolTests",
+        "--",
+        "--test",
+        "{tests}"
+      ]
+    },
+    "lua-plan": {
+      "build": [
+        "true"
+      ],
+      "test": [
+        "{nvim}",
+        "--headless",
+        "--clean",
+        "--cmd",
+        "set rtp^=.",
+        "-l",
+        "tests/nvim/plan_test.lua"
+      ]
+    },
+    "lua-client": {
+      "build": [
+        "true"
+      ],
+      "test": [
+        "{nvim}",
+        "--headless",
+        "--clean",
+        "--cmd",
+        "set rtp^=.",
+        "-l",
+        "tests/nvim/client_test.lua"
+      ]
+    }
+  },
   "mutations": [
     {
       "id": "PLAN-1",
@@ -174,6 +206,138 @@
         "second_operation_is_busy"
       ],
       "verifies": "HLR-CONC-1"
+    },
+    {
+      "id": "LUAPLAN-1",
+      "runner": "lua-plan",
+      "file": "lua/dbbliss/plan.lua",
+      "why": "a statement the backend did not classify is not asked about before an actual plan",
+      "find": "if mode == 'actual' and t.kind ~= 'read' then",
+      "replace": "if mode == 'actual' and t.kind == 'write' then",
+      "tests": [
+        "plan_actual_of_a_write_asks_first_and_then_says_so"
+      ],
+      "verifies": "LLR-PLAN-12"
+    },
+    {
+      "id": "LUAPLAN-2",
+      "runner": "lua-plan",
+      "file": "lua/dbbliss/plan.lua",
+      "why": "the confirmation is asked but the word is not sent",
+      "find": "params.confirm_execute = true",
+      "replace": "",
+      "tests": [
+        "plan_actual_of_a_write_asks_first_and_then_says_so"
+      ],
+      "verifies": "LLR-PLAN-12"
+    },
+    {
+      "id": "LUAPLAN-3",
+      "runner": "lua-plan",
+      "file": "lua/dbbliss/plan.lua",
+      "why": "the plan is sent although the user said No",
+      "find": "if not deps.confirm(text) then",
+      "replace": "if false then",
+      "tests": [
+        "plan_actual_of_a_write_declined_sends_nothing"
+      ],
+      "verifies": "LLR-PLAN-12"
+    },
+    {
+      "id": "LUAPLAN-4",
+      "runner": "lua-plan",
+      "file": "lua/dbbliss/plan.lua",
+      "why": "no node is marked hottest",
+      "find": "local hot = present(doc.hottest) and doc.hottest == n.id",
+      "replace": "local hot = false",
+      "tests": [
+        "plan_hottest_node_is_marked_and_highlighted"
+      ],
+      "verifies": "LLR-PLAN-11"
+    },
+    {
+      "id": "LUAPLAN-5",
+      "runner": "lua-plan",
+      "file": "lua/dbbliss/plan.lua",
+      "why": "a row estimate that is off by a factor is shown without it",
+      "find": "if r > 0.95 and r < 1.05 then",
+      "replace": "if r > 0 then",
+      "tests": [
+        "plan_tree_shows_cost_rows_factor_loops_and_time"
+      ],
+      "verifies": "LLR-PLAN-11"
+    },
+    {
+      "id": "LUAPLAN-6",
+      "runner": "lua-plan",
+      "file": "lua/dbbliss/plan.lua",
+      "why": "a collapsed node still shows its children",
+      "find": "if not collapsed then",
+      "replace": "if true then",
+      "tests": [
+        "plan_nodes_collapse_and_expand_with_the_keys"
+      ],
+      "verifies": "LLR-PLAN-11"
+    },
+    {
+      "id": "LUAPLAN-7",
+      "runner": "lua-plan",
+      "file": "lua/dbbliss/plan.lua",
+      "why": "a failed plan does not show the server's words",
+      "find": "add('FAILED: ' .. tostring(op.error or 'unknown error'), 'DbblissError')",
+      "replace": "add('FAILED', 'DbblissError')",
+      "tests": [
+        "plan_failed_and_cancelled_plans_name_their_end"
+      ],
+      "verifies": "LLR-PLAN-11"
+    },
+    {
+      "id": "LUAPLAN-8",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "a plan on prod asks the run-the-writes question as well as the plan question",
+      "find": "end, { skip_confirm = true })",
+      "replace": "end, {})",
+      "tests": [
+        "plan_actual_of_a_write_on_prod_asks_once_and_not_for_the_run"
+      ],
+      "verifies": "LLR-PLAN-12"
+    },
+    {
+      "id": "LUAPLAN-9",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "two statements are planned as one",
+      "find": "if #statements ~= 1 then\n      notify(('plan takes one",
+      "replace": "if #statements < 1 then\n      notify(('plan takes one",
+      "tests": [
+        "plan_command_takes_one_statement"
+      ],
+      "verifies": "LLR-PLAN-12"
+    },
+    {
+      "id": "LUAPLAN-10",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "planning leaves the connection marked as running a script",
+      "find": "    state.scripts[conn_id] = nil\n    if #statements ~= 1 then",
+      "replace": "    if #statements ~= 1 then",
+      "tests": [
+        "plan_command_plans_the_statement_under_the_cursor"
+      ],
+      "verifies": "LLR-PLAN-12"
+    },
+    {
+      "id": "LUAPLAN-11",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "plan/done is not routed to the viewer",
+      "find": "    plan.handle_notification('plan/done', p)",
+      "replace": "",
+      "tests": [
+        "plan_done_notification_reaches_the_viewer"
+      ],
+      "verifies": "LLR-PLAN-11"
     }
   ]
 }

@@ -513,6 +513,93 @@ local tests = {
       expect(next(dbbliss._state.scripts) == nil, 'the script is still marked as running')
     end,
   },
+  {
+    -- Verifies: LLR-PLAN-12
+    'plan_command_plans_the_statement_under_the_cursor',
+    '',
+    function()
+      script_setup({ 'select 1;', 'select 2;' })
+      vim.api.nvim_win_set_cursor(0, { 2, 0 })
+      dbbliss.plan('estimated', 'statement')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0), stmt('select 2;', 1) } })
+      local r = take('plan/start')
+      expect(r ~= nil, 'no plan/start was sent')
+      expect(r.params.connection_id == 'c1' and r.params.sql == 'select 2;' and r.params.mode == 'estimated', 'wrong request: ' .. vim.inspect(r.params))
+      expect(r.params.confirm_execute == nil, 'an estimate carries no confirm_execute')
+      expect(next(dbbliss._state.scripts) == nil, 'planning must not leave the connection marked as running a script')
+      expect(take('execute') == nil, 'planning ran the statement')
+    end,
+  },
+  {
+    -- Verifies: LLR-PLAN-12
+    'plan_command_takes_one_statement',
+    '',
+    function()
+      script_setup({ 'select 1;', 'select 2;' })
+      dbbliss.plan('estimated', 'range', { 1, 2 })
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0), stmt('select 2;', 1) } })
+      expect(take('plan/start') == nil, 'two statements were planned as one')
+      expect(next(dbbliss._state.scripts) == nil, 'the script mark is released')
+    end,
+  },
+  {
+    -- Verifies: LLR-PLAN-12
+    'plan_actual_of_a_write_on_prod_asks_once_and_not_for_the_run',
+    '',
+    function()
+      dbbliss.setup({ connections = { a = { engine = 'postgres', connection_string = 'Host=x', env = 'prod' } } })
+      script_setup({ 'delete from t;' })
+      local write = stmt('delete from t;', 0)
+      write.kind = 'write'
+      stub.confirm_answer = 2
+      dbbliss.plan('actual', 'statement')
+      take('script/split').cb(nil, { statements = { write } })
+      expect(stub.confirms == 1, 'expected one question (about the plan), got ' .. stub.confirms)
+      expect(take('plan/start') == nil, 'planned although the user said No')
+      stub.confirm_answer = 1
+      dbbliss.plan('actual', 'statement')
+      take('script/split').cb(nil, { statements = { write } })
+      expect(stub.confirms == 2, 'one question per plan')
+      local r = take('plan/start')
+      expect(r and r.params.confirm_execute == true and r.params.mode == 'actual', 'sent with the word: ' .. vim.inspect(r and r.params))
+    end,
+  },
+  {
+    -- Verifies: LLR-PLAN-12
+    'plan_subcommand_is_dispatched_and_completed',
+    '',
+    function()
+      local saved = dbbliss.plan
+      local got
+      dbbliss.plan = function(mode, scope, range)
+        got = { mode, scope, range }
+      end
+      dbbliss.command({ args = 'plan', range = 0 })
+      expect(vim.deep_equal(got, { 'estimated', 'statement', nil }), 'plain plan is an estimate of the statement: ' .. vim.inspect(got))
+      dbbliss.command({ args = 'plan actual', range = 2, line1 = 3, line2 = 4 })
+      expect(vim.deep_equal(got, { 'actual', 'range', { 3, 4 } }), 'plan actual with a range: ' .. vim.inspect(got))
+      got = nil
+      dbbliss.command({ args = 'plan sideways', range = 0 })
+      expect(got == nil, 'an unknown mode plans nothing')
+      dbbliss.plan = saved
+      expect(vim.tbl_contains(dbbliss.complete('', 'Dbbliss '), 'plan'), 'plan is completed')
+      expect(vim.deep_equal(dbbliss.complete('', 'Dbbliss plan '), { 'actual', 'estimated' }), 'modes are completed: ' .. vim.inspect(dbbliss.complete('', 'Dbbliss plan ')))
+    end,
+  },
+  {
+    -- Verifies: LLR-PLAN-11
+    'plan_done_notification_reaches_the_viewer',
+    '',
+    function()
+      script_setup({ 'select 1;' })
+      expect(stub.handlers['plan/done'] ~= nil, 'plan/done has no handler')
+      local plan = require('dbbliss.plan')
+      plan._state.ops.px = { id = 'px', sql = 'select 1', mode = 'estimated', status = 'running', plans = {}, collapsed = {} }
+      stub.handlers['plan/done']({ plan_id = 'px', connection_id = 'c1', status = 'failed', plans = {}, error = 'boom' })
+      expect(plan._state.ops.px.status == 'failed' and plan._state.ops.px.error == 'boom', 'the operation was not updated')
+      plan._state.ops.px = nil
+    end,
+  },
 }
 
 local failed = 0

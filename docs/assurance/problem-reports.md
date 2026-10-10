@@ -34,7 +34,7 @@ because they weaken the evidence.
 | PR-021 | assurance (coverage) | An `export` option without a path was silently ignored and the query ran without exporting | LLR-WIRE-2 | refused as invalid params; `execute_options` |
 | PR-022 | assurance (scenario for the interval option) | A negative `pg_client_connection_check_interval_ms` was silently treated as off | LLR-PG-1 | refused at connect; `pg_session_settings` |
 | PR-023 | assurance (reading `DescribeError` for coverage) | A SQL Server error that is not in a statement (a refused connection, a failed login) reported line 0 instead of no line | HLR-SCRIPT-3 | the line is reported only when the server gave one; `connect_failure` |
-| PR-024 | assurance (inspection of the harness, Phase 5) | `trace.py` let a test take the `Verifies:` tags of the test above it (a window of three lines), so 134 of 255 test-to-requirement links were claimed by tests that do not verify them | (tooling) | a tag stops at the previous registry line; `test_trace.py`: `test_a_tag_does_not_cross_into_the_previous_test` |
+| PR-024 | assurance (inspection of the harness, Phase 5) | `trace.py` let a test take the `Verifies:` tags of the test above it (a window of three lines), so 134 of 255 test-to-requirement links were claimed by tests that do not verify them | (tooling) | a tag stops at the previous registry line; `test_trace.py`, test: a tag does not cross into the previous test |
 | PR-025 | assurance (inspection of the harness, Phase 5) | The cancel suite passed when an engine was not configured or a scenario skipped, so a CI run could be green with half its evidence missing | (tooling) | `DBBLISS_REQUIRE_ENGINES` and `DBBLISS_ALLOWED_SKIPS` in CI |
 
 ## Open

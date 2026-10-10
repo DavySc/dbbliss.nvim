@@ -11,7 +11,7 @@ end, {
   complete = function(arglead, cmdline)
     return require('dbbliss').complete(arglead, cmdline)
   end,
-  desc = 'dbbliss: connect | exec | exec_all | export | fetch | info | tree | script | cancel | begin | commit | rollback | disconnect | status',
+  desc = 'dbbliss: connect | exec | plan | exec_all | export | fetch | info | tree | script | cancel | begin | commit | rollback | disconnect | status',
 })
 
 vim.api.nvim_create_autocmd('VimLeavePre', {

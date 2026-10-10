@@ -6,16 +6,21 @@ test can fail. Until now they were done by hand and only described in commit mes
 them, so a test that stops being able to fail (or code that moves out from under its mutation) is
 found by a run, not by a reader.
 
-For each mutation: (1) the named tests must pass on the unmutated code; (2) the file is changed
-(`find` must occur exactly once); (3) the project must still build (an unbuildable mutant proves
-nothing); (4) at least one named test must fail. A mutant that survives, a find that no longer
-matches, or an unbuildable mutant is a problem. The file is always restored.
+For each mutation: (1) the named tests must pass on the unmutated code (their line says PASS);
+(2) the file is changed (`find` must occur exactly once); (3) the project must still build (an
+unbuildable mutant proves nothing); (4) at least one named test must report FAIL (a mutant that only
+crashes the runner is not a kill). A mutant that survives, a find that no longer matches, or an
+unbuildable mutant is a problem. The file is always restored.
+
+The registry names its runners ("runners": {name: {build, test}}) and each mutation its runner
+(default "protocol"). `{tests}` in a command is the comma-joined test names, `{nvim}` is $NVIM or `nvim`.
 
 Usage: mutate.py [--id M1,M2] [--list]
 Exit 1 on any problem. Only the standard library is used.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -25,9 +30,15 @@ REGISTRY = ROOT / "docs/assurance/mutations.json"
 
 
 def run(cmd, tests=None):
-    cmd = [c.replace("{tests}", ",".join(tests or [])) for c in cmd]
+    cmd = [c.replace("{tests}", ",".join(tests or [])).replace("{nvim}", os.environ.get("NVIM", "nvim")) for c in cmd]
     r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
+
+
+def status(out, name):
+    """'PASS', 'FAIL' or None: what the runner printed for one test."""
+    m = re.search(rf"^{re.escape(name)}\s+(PASS|FAIL)\b", out, re.M)
+    return m.group(1) if m else None
 
 
 def main():
@@ -55,22 +66,23 @@ def main():
         if n != 1:
             problems.append(f"{label}: `find` occurs {n} times, expected 1 (the code moved: update the registry)")
             continue
-        code, out = run(reg["test"], m["tests"])
-        if code != 0:
-            problems.append(f"{label}: the tests fail on the unmutated code, so a failure would prove nothing\n{out[-600:]}")
+        r = reg["runners"][m.get("runner", "protocol")]
+        code, out = run(r["test"], m["tests"])
+        if any(status(out, t) != "PASS" for t in m["tests"]):
+            problems.append(f"{label}: the tests do not all pass on the unmutated code, so a failure would prove nothing\n{out[-600:]}")
             continue
         try:
             path.write_text(original.replace(m["find"], m["replace"]))
-            code, out = run(reg["build"])
+            code, out = run(r["build"])
             if code != 0:
                 problems.append(f"{label}: the mutant does not build (an invalid mutant proves nothing)\n{out[-600:]}")
                 continue
-            code, out = run(reg["test"], m["tests"])
+            code, out = run(r["test"], m["tests"])
         finally:
             path.write_text(original)
-            run(reg["build"])  # the next baseline run uses the build output: it must match the restored source
-        if code == 0:
-            problems.append(f"{label}: SURVIVED, none of {', '.join(m['tests'])} failed")
+            run(r["build"])  # the next baseline run uses the build output: it must match the restored source
+        if not any(status(out, t) == "FAIL" for t in m["tests"]):
+            problems.append(f"{label}: SURVIVED, none of {', '.join(m['tests'])} reported FAIL")
             print(f"SURVIVED {label}")
         else:
             killed += 1

@@ -8,6 +8,7 @@ local names = require('dbbliss.names')
 local tree = require('dbbliss.tree')
 local sessions = require('dbbliss.sessions')
 local management = require('dbbliss.management')
+local plan = require('dbbliss.plan')
 
 local M = {}
 
@@ -155,6 +156,12 @@ function M.setup(opts)
     end,
     notify = notify,
   })
+  plan.setup({
+    request = function(conn_id, method, params, cb)
+      M._catalog_request(conn_id, method, params, cb)
+    end,
+    notify = notify,
+  })
   M._apply_mappings()
   results.setup({
     window_rows = state.config.results.window_rows,
@@ -196,6 +203,9 @@ local function register_handlers(b)
   end)
   b:on('backup/done', function(p)
     management.handle_notification('backup/done', p)
+  end)
+  b:on('plan/done', function(p)
+    plan.handle_notification('plan/done', p)
   end)
   b:on('query/resultset', function(p)
     local q = state.queries[p.query_id]
@@ -547,7 +557,8 @@ end
 ---@param scope 'statement'|'buffer'|'range'
 ---@param range { [1]: integer, [2]: integer }?  1-based first and last line, for 'range'
 ---@param cb fun(name: string, conn_id: string, bufnr: integer, statements: dbbliss.Statement[], base_line: integer)
-local function with_statements(scope, range, cb)
+---@param opts { skip_confirm: boolean? }?  skip_confirm: nothing is run (a plan), so the prod question for writes is not asked
+local function with_statements(scope, range, cb, opts)
   local name, conn = current_connection()
   if not conn then
     return
@@ -583,7 +594,7 @@ local function with_statements(scope, range, cb)
       return
     end
     vim.b[bufnr].dbbliss_connection = name
-    if not confirm_writes(name, statements) then
+    if not (opts and opts.skip_confirm) and not confirm_writes(name, statements) then
       state.scripts[conn_id] = nil
       notify('cancelled: nothing was run on ' .. name)
       return
@@ -601,6 +612,30 @@ function M.run(scope, range)
     results.clear()
     run_queue(name, conn_id, bufnr, script.expand(statements, base_line))
   end)
+end
+
+--- Plans the statement under the cursor (or a range holding one statement) on a session of the
+--- backend's own and shows the plan. An actual plan runs the statement and rolls it back: the plan
+--- module asks first unless the statement is plainly a read.
+---@param mode 'estimated'|'actual'
+---@param scope 'statement'|'range'?
+---@param range { [1]: integer, [2]: integer }?
+function M.plan(mode, scope, range)
+  with_statements(scope or 'statement', range, function(name, conn_id, _, statements)
+    state.scripts[conn_id] = nil
+    if #statements ~= 1 then
+      notify(('plan takes one statement, got %d; put the cursor in one or select just it'):format(#statements), vim.log.levels.ERROR)
+      return
+    end
+    plan.start({
+      conn_id = conn_id,
+      conn_name = name,
+      engine = state.connections[name].engine,
+      sql = statements[1].text,
+      mode = mode,
+      kind = statements[1].kind,
+    })
+  end, { skip_confirm = true })
 end
 
 --- Writes one statement's first result set to a CSV file, in the backend: the rows never pass
@@ -1133,6 +1168,16 @@ local subcommands = {
   info = function(args)
     M.info(table.concat(args, ' '))
   end,
+  -- The plan of the statement under the cursor (or the range): estimated (default) or actual, which
+  -- runs the statement and rolls it back.
+  plan = function(args, range)
+    local mode = args[1] or 'estimated'
+    if mode ~= 'estimated' and mode ~= 'actual' then
+      notify('usage: :Dbbliss plan [estimated|actual]', vim.log.levels.ERROR)
+      return
+    end
+    M.plan(mode, range and 'range' or 'statement', range)
+  end,
   -- The schema browser.
   tree = function()
     M.tree()
@@ -1186,6 +1231,8 @@ function M.complete(arglead, cmdline)
     candidates = vim.tbl_keys(subcommands)
   elseif words[2] == 'connect' then
     candidates = vim.tbl_keys(state.config.connections)
+  elseif words[2] == 'plan' then
+    candidates = { 'estimated', 'actual' }
   else
     candidates = {}
   end
