@@ -153,7 +153,7 @@ public sealed partial class Scenarios
     {
         var (steps, step, ok) = Steps();
         await using var observer = await profile.OpenObserverAsync();
-        await profile.CreateScratchAsync(observer, Scratch, profile.Engine == "postgres" ? 3000000 : 1500000);
+        await profile.CreateScratchAsync(observer, Scratch, profile.Engine == "postgres" ? 2000000 : 1500000);
         var (c, conn, _) = await StartAsync();
         await using var _c = c;
         var path = await BackupPathAsync(c, conn, "cancel-" + Guid.NewGuid().ToString("N")[..8]);

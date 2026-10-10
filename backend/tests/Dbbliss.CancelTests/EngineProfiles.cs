@@ -107,6 +107,8 @@ public abstract class EngineProfile
     {
         await using var cmd = observer.CreateCommand();
         cmd.CommandText = sql;
+        // Fixtures can be large (a scratch database for a backup that takes a while): no 30 s default.
+        cmd.CommandTimeout = 0;
         await cmd.ExecuteNonQueryAsync();
     }
 
@@ -163,7 +165,7 @@ public sealed class PostgresProfile : EngineProfile
         await ExecAsync(observer, "CREATE DATABASE " + database);
         await using var c = await OpenObserverAsync(database);
         await ExecAsync(c, "CREATE TABLE bkp_probe (id int PRIMARY KEY, pad text)");
-        await ExecAsync(c, $"INSERT INTO bkp_probe SELECT g, md5(g::text) || md5((g * 7)::text) || md5((g * 13)::text) FROM generate_series(1, {rows}) g");
+        await ExecAsync(c, $"INSERT INTO bkp_probe SELECT g, repeat(md5(g::text), 3) FROM generate_series(1, {rows}) g");
         await ExecAsync(c, "CREATE TABLE parent (id int PRIMARY KEY)");
         await ExecAsync(c, "CREATE TABLE child (id int PRIMARY KEY, parent_id int NOT NULL REFERENCES parent(id))");
         await ExecAsync(c, "CREATE VIEW v_probe AS SELECT id FROM bkp_probe");
