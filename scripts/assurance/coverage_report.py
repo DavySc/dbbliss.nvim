@@ -16,18 +16,24 @@ Gate (docs/assurance/coverage-policy.json):
                   its code by a snippet that must occur on exactly one line of the file ("match"),
                   plus lines before/after it, so edits elsewhere do not move it.
   ratchet         per file, statement and decision percentages may not fall below the baseline.
-  A justification that no longer matches an uncovered item is itself an error, so the list cannot rot.
+  A justification that no longer matches an uncovered item is itself an error, so the list cannot rot,
+  and so is one for a file that is not critical (it would never be read).
+  A measured file that is in neither the baseline nor the critical list is an error: a new file must
+  enter the ratchet in the commit that adds it (--update-baseline).
+  --update-baseline refuses to lower a recorded value unless --allow-lower is given too, so the floor
+  cannot be quietly dropped to make a run pass.
 
-Usage: coverage_report.py [--check] [--update-baseline]
+Usage: coverage_report.py [--check] [--update-baseline [--allow-lower]]
 Exit 1 when --check finds a violation. Only the standard library is used.
 """
 import json
+import os
 import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(os.environ.get("DBBLISS_ROOT") or Path(__file__).resolve().parents[2])
 COV = ROOT / "coverage"
 POLICY = ROOT / "docs/assurance/coverage-policy.json"
 JUSTIFICATIONS = ROOT / "docs/assurance/coverage-justifications.json"
@@ -179,7 +185,9 @@ def main():
         shown = ", ".join(f"{k} {n}" for k, n in items[:25]) + (" ..." if len(items) > 25 else "")
         problems.append(f"{f}: {len(items)} uncovered item(s) without justification: {shown}")
     for i, j in enumerate(js):
-        if i not in used and j[0] in policy.get("critical", []):
+        if j[0] not in policy.get("critical", []):
+            problems.append(f"justification for a file that is not critical (never read): {j[5]}")
+        elif i not in used:
             problems.append(f"stale justification (nothing uncovered there any more): {j[5]} ({j[3]})")
 
     # --- ratchet ----------------------------------------------------------------------------
@@ -190,6 +198,8 @@ def main():
     for f, cur in current.items():
         base = baseline.get(f)
         if not base:
+            if baseline and f not in policy.get("critical", []):
+                problems.append(f"{f} is measured but not in the baseline: run coverage_report.py --update-baseline and commit it")
             continue
         for k in ("lines", "branches"):
             if k in cur and k in base and cur[k] + tol < base[k]:
@@ -238,6 +248,14 @@ def main():
     print("\n".join(md))
 
     if update:
+        lowered = [
+            f"{f} {k}: {baseline[f][k]}% -> {cur[k]}%"
+            for f, cur in current.items() for k in ("lines", "branches")
+            if f in baseline and k in cur and k in baseline[f] and cur[k] + tol < baseline[f][k]
+        ]
+        if lowered and "--allow-lower" not in sys.argv:
+            print("\nbaseline NOT written, it would lower:\n  " + "\n  ".join(lowered) + "\nfix the coverage, or pass --allow-lower and say why in the commit.", file=sys.stderr)
+            return 1
         BASELINE.write_text(json.dumps(current, indent=1, sort_keys=True) + "\n")
         print(f"\nbaseline written: {BASELINE.relative_to(ROOT)}")
         return 0

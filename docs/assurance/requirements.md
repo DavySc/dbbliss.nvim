@@ -317,8 +317,8 @@ A session id shall be a plain integer where the engine's actions take one, and `
 only from that integer; anything else is refused with code 1008. Source: decision 46.
 
 ### LLR-ADM-10
-Session SQL shall not use DISTINCT or GROUP BY to remove duplicates (as LLR-CAT-9). Verified by
-analysis.
+Session SQL shall not use DISTINCT or GROUP BY to remove duplicates (as LLR-CAT-9). Source: LLR-CAT-9; phase 3
+decisions. Method: A (`CatalogSqlRules`).
 
 ### LLR-ADM-11
 The sessions buffer shall show the rows as an aligned table in the order given, mark the
@@ -512,7 +512,7 @@ catalog session. Source: phase 5 plan; decision 65.
 
 ### LLR-COMP-2
 Catalog SQL for completion shall not use DISTINCT or GROUP BY to remove duplicates (as LLR-CAT-9).
-Verified by analysis.
+Source: LLR-CAT-9; phase 5 plan. Method: A (`CatalogSqlRules`).
 
 ### LLR-COMP-3
 The completion core shall tell from the text before the cursor what is wanted: object names after

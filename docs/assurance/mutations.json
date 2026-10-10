@@ -1,0 +1,179 @@
+{
+  "build": [
+    "dotnet",
+    "build",
+    "backend/tests/Dbbliss.ProtocolTests",
+    "-v",
+    "q",
+    "--nologo"
+  ],
+  "test": [
+    "dotnet",
+    "run",
+    "--no-build",
+    "--project",
+    "backend/tests/Dbbliss.ProtocolTests",
+    "--",
+    "--test",
+    "{tests}"
+  ],
+  "mutations": [
+    {
+      "id": "PLAN-1",
+      "file": "backend/src/Dbbliss.Backend/Plans/PostgresPlanner.cs",
+      "why": "an actual plan runs outside a transaction (it would autocommit)",
+      "find": "if (actual) await session.BeginTransactionAsync(ct);",
+      "replace": "",
+      "tests": [
+        "planner_pg_actual_is_rolled_back"
+      ],
+      "verifies": "HLR-PLAN-1"
+    },
+    {
+      "id": "PLAN-2",
+      "file": "backend/src/Dbbliss.Backend/Plans/PostgresPlanner.cs",
+      "why": "the transaction of an actual plan is never ended",
+      "find": "if (actual) await PlannerSupport.RollBackQuietlyAsync(session);",
+      "replace": "",
+      "tests": [
+        "planner_pg_actual_is_rolled_back",
+        "planner_pg_cancel_rolls_back"
+      ],
+      "verifies": "HLR-PLAN-1, HLR-PLAN-2"
+    },
+    {
+      "id": "PLAN-3",
+      "file": "backend/src/Dbbliss.Backend/Plans/SqlServerPlanner.cs",
+      "why": "an actual plan runs outside a transaction",
+      "find": "if (actual) await session.BeginTransactionAsync(ct);",
+      "replace": "",
+      "tests": [
+        "planner_mssql_actual_is_rolled_back"
+      ],
+      "verifies": "HLR-PLAN-1"
+    },
+    {
+      "id": "PLAN-4",
+      "file": "backend/src/Dbbliss.Backend/Plans/SqlServerPlanner.cs",
+      "why": "the transaction of an actual plan is never ended",
+      "find": "if (actual) await PlannerSupport.RollBackQuietlyAsync(session);",
+      "replace": "",
+      "tests": [
+        "planner_mssql_actual_is_rolled_back",
+        "planner_mssql_cancel_rolls_back"
+      ],
+      "verifies": "HLR-PLAN-1, HLR-PLAN-2"
+    },
+    {
+      "id": "PLAN-5",
+      "file": "backend/src/Dbbliss.Backend/Plans/PlannerSupport.cs",
+      "why": "the plan transaction is committed instead of rolled back",
+      "find": "await session.RollbackAsync(CancellationToken.None);",
+      "replace": "await session.CommitAsync(CancellationToken.None);",
+      "tests": [
+        "planner_pg_actual_is_rolled_back",
+        "planner_mssql_actual_is_rolled_back"
+      ],
+      "verifies": "HLR-PLAN-1"
+    },
+    {
+      "id": "PLAN-6",
+      "file": "backend/src/Dbbliss.Backend/Management/OperationManager.cs",
+      "why": "an actual plan of a write needs no confirmation",
+      "find": "&& !request.ConfirmExecute",
+      "replace": "&& request.ConfirmExecute",
+      "tests": [
+        "plan_actual_of_a_write_needs_the_callers_word"
+      ],
+      "verifies": "HLR-PLAN-1"
+    },
+    {
+      "id": "PLAN-7",
+      "file": "backend/src/Dbbliss.Backend/Plans/PlanModels.cs",
+      "why": "a tie for the hottest node goes to the last node, not the first",
+      "find": "v > own(best)!.Value",
+      "replace": "v >= own(best)!.Value",
+      "tests": [
+        "plan_own_figures_and_hottest_node"
+      ],
+      "verifies": "LLR-PLAN-10"
+    },
+    {
+      "id": "PLAN-8",
+      "file": "backend/src/Dbbliss.Backend/Plans/PlanModels.cs",
+      "why": "own cost may go negative",
+      "find": "Math.Max(0, cost - n.Children.Sum(c => c.Cost ?? 0))",
+      "replace": "cost - n.Children.Sum(c => c.Cost ?? 0)",
+      "tests": [
+        "plan_own_figures_and_hottest_node"
+      ],
+      "verifies": "LLR-PLAN-10"
+    },
+    {
+      "id": "PLAN-9",
+      "file": "backend/src/Dbbliss.Backend/Plans/PlanModels.cs",
+      "why": "the hottest node is chosen by cost even when times exist",
+      "find": "(byTime ?? Hottest(all, n => n.SelfCost))",
+      "replace": "(Hottest(all, n => n.SelfCost) ?? byTime)",
+      "tests": [
+        "plan_own_figures_and_hottest_node"
+      ],
+      "verifies": "LLR-PLAN-10"
+    },
+    {
+      "id": "CLASS-1",
+      "file": "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs",
+      "why": "a statement that is not a query start is read, not write (FC-5)",
+      "find": "if (!QueryStarts.Contains(first)) return StatementKind.Write;",
+      "replace": "if (!QueryStarts.Contains(first)) return StatementKind.Read;",
+      "tests": [
+        "classifier_cases"
+      ],
+      "verifies": "LLR-CLASS-1"
+    },
+    {
+      "id": "CLASS-2",
+      "file": "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs",
+      "why": "a SELECT that writes (data-modifying word) counts as a read (FC-5)",
+      "find": "return words.Any(DataWords.Contains) ? StatementKind.Write : StatementKind.Read;",
+      "replace": "return StatementKind.Read;",
+      "tests": [
+        "classifier_cases"
+      ],
+      "verifies": "LLR-CLASS-1"
+    },
+    {
+      "id": "DROP-1",
+      "file": "backend/src/Dbbliss.Backend/Management/OperationManager.cs",
+      "why": "a prod drop accepts a backup older than the limit",
+      "find": "if (Stopwatch.GetElapsedTime(backup.FinishedAt) > DropBackupMaxAge)",
+      "replace": "if (false)",
+      "tests": [
+        "stale_backups_do_not_count"
+      ],
+      "verifies": "LLR-MGT-14"
+    },
+    {
+      "id": "DROP-2",
+      "file": "backend/src/Dbbliss.Backend/Management/OperationManager.cs",
+      "why": "a prod drop accepts a backup that did not complete",
+      "find": "if (backup.Status != \"completed\") throw",
+      "replace": "if (false) throw",
+      "tests": [
+        "prod_drop_needs_a_fresh_verified_backup"
+      ],
+      "verifies": "HLR-MGT-8"
+    },
+    {
+      "id": "LEASE-1",
+      "file": "backend/src/Dbbliss.Backend/Backend.cs",
+      "why": "a second operation on a busy connection is allowed",
+      "find": "public IDisposable? TryAcquire() => _busy.Wait(0) ? new Lease(_busy) : null;",
+      "replace": "public IDisposable? TryAcquire() => new Lease(_busy);",
+      "tests": [
+        "second_operation_is_busy"
+      ],
+      "verifies": "HLR-CONC-1"
+    }
+  ]
+}

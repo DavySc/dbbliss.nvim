@@ -122,8 +122,13 @@ jobs:
           env -u DBBLISS_E2E_PASS -u DBBLISS_E2E_CREDMAN DBBLISS_E2E_ENGINE=sqlserver DBBLISS_E2E_CS="$DBBLISS_TEST_MSSQL" ${DBBLISS_TEST_MSSQL_PASSWORD:+DBBLISS_E2E_PW_ENV=DBBLISS_TEST_MSSQL_PASSWORD} \
             nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/e2e_test.lua
 
+      # A green run must not hide a gap: both engines are required, and a scenario may only skip where
+      # it cannot run (SIGTERM does not exist on Windows; the limited SQL login needs SQL authentication).
       - name: Phase 0 cancel suite
         shell: bash
+        env:
+          DBBLISS_REQUIRE_ENGINES: postgres,sqlserver
+          DBBLISS_ALLOWED_SKIPS: ${{ runner.os == 'Windows' && 'backend_sigterm,sessions_limited_user' || '' }}
         run: dotnet run --project backend/tests/Dbbliss.CancelTests -- --report cancel-report.md
 
       - name: Report
@@ -190,6 +195,23 @@ jobs:
         shell: bash
         run: spec/check.sh
 
+  # Replays the recorded mutation checks (docs/assurance/mutations.json): break the code in one stated
+  # way and the named tests must fail. Needs no database. A survivor means a test that cannot fail.
+  mutation:
+    runs-on: ubuntu-latest
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Self-test of the runner
+        run: python3 scripts/assurance/tests/test_mutate.py
+      - name: Replay the mutations
+        run: python3 scripts/assurance/mutate.py
+
   # Verification evidence, DO-178C style (docs/assurance/plan.md): requirements-to-test traceability
   # and structural coverage (statement and decision for the backend, statement for Lua) merged over
   # the suites. Linux only: the coverage tools instrument the backend as a child process.
@@ -227,6 +249,8 @@ jobs:
           dotnet tool install -g dotnet-coverage --version 18.12.0
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
       - name: Backend coverage (protocol tests and cancel suite)
+        env:
+          DBBLISS_REQUIRE_ENGINES: postgres,sqlserver
         run: scripts/assurance/dotnet-coverage.sh
       - name: Lua coverage (client, results, catalog and end-to-end tests)
         env:
@@ -236,6 +260,10 @@ jobs:
         run: |
           scripts/build.sh linux-x64
           scripts/assurance/lua-coverage.sh
+      - name: Self-tests of the assurance scripts (each check must be able to fail)
+        run: |
+          python3 scripts/assurance/tests/test_trace.py
+          python3 scripts/assurance/tests/test_coverage.py
       - name: Traceability (requirements to tests, both directions)
         run: |
           python3 scripts/assurance/trace.py --check

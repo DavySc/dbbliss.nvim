@@ -57,8 +57,8 @@ Table numbers refer to DO-178C Annex A.
 | A-4 Design verifies against requirements | partly | `spec/` models cover cancel, paging, transactions, quit; not every requirement has a model |
 | A-5 Code complies with requirements and standards, is traceable | partly | build rules, warnings as errors, review checklist. **Code-to-requirement traceability is by tests, not by tags in the code** |
 | A-6 Tests are requirements-based and robust | met for the catalog, partly overall | every test is tagged to a requirement; normal-range and robustness cases exist (`FailureCases`, `RobustnessCases`, `UnitCases`); see "Known gaps" |
-| A-7 Verification of the verification: test procedures correct | partly | new tests are mutation-checked by hand (the code is broken and the test must fail); this is **not automated** |
-| A-7 Requirements coverage | met | `trace.py --check` fails CI for an untested requirement or an untagged test |
+| A-7 Verification of the verification: test procedures correct | partly | new tests are mutation-checked: the checks of Phase 5 on are recorded in `mutations.json` and **replayed by CI** (`scripts/assurance/mutate.py`, job `mutation`); earlier phases' checks were done by hand and are only in commit messages. The assurance scripts have their own self-tests (`scripts/assurance/tests/`), each check shown able to fail |
+| A-7 Requirements coverage | met | `trace.py --check` fails CI for an untested requirement, an untagged test, a test method that no registry runs, a suite CI or the coverage script does not run, a problem report or mutation naming a test that does not exist; a tag belongs to the test below it only (PR-024). Requirements verified by one test are listed in the matrix |
 | A-7 Structural coverage (Level B: decision) | partly | C# statement and branch coverage, merged over suites, gated for the critical backend files (17 justified exceptions at the last measured commit, listed with reasons); **Lua statement coverage only**; platform-specific code unmeasured |
 | A-7 Unreached code is justified or removed | partly | every uncovered item in a critical file is covered by a test, removed, or has an entry in `coverage-justifications.json` with a category; non-critical files (catalog queries, Lua, `Program.cs`) are only ratcheted |
 | A-8 Configuration management | partly | git + CI; **no baseline tags yet**; no access control beyond GitHub |
@@ -74,11 +74,15 @@ Table numbers refer to DO-178C Annex A.
 | cancel suite | `dotnet run --project backend/tests/Dbbliss.CancelTests` | PostgreSQL, SQL Server, Neovim | the published backend against real servers, both engines, Linux and Windows |
 | end-to-end | `tests/nvim/e2e_test.lua` | databases, Neovim | the real plugin, backend and server |
 | formal models | `spec/check.sh` | Java, Quint, TLC | design-level safety and liveness |
-| traceability | `python3 scripts/assurance/trace.py --check` | Python 3 | requirement ↔ test, both directions |
+| traceability | `python3 scripts/assurance/trace.py --check` | Python 3 | requirement ↔ test, both directions; registries, CI and coverage-script consistency |
+| mutation checks | `python3 scripts/assurance/mutate.py [--id X] [--list]` | .NET SDK | replays `mutations.json`: the named tests pass, the code is broken one stated way, they must fail |
+| harness self-tests | `python3 scripts/assurance/tests/test_trace.py`, `test_coverage.py`, `test_mutate.py` | Python 3 | each check of the three scripts can fail |
 | coverage | `scripts/assurance/dotnet-coverage.sh`, `lua-coverage.sh`, then `coverage_report.py --check` | the above, `dotnet-coverage`, luacov | structural coverage |
 
 All run in CI on every push (job names: `cancel-suite`, `lua-min-version`, `spec-check`,
-`assurance`). Coverage is measured on Linux only: the tools instrument the backend as a child
+`mutation`, `assurance`). The cancel suite runs with `DBBLISS_REQUIRE_ENGINES` (a missing engine fails
+the run) and `DBBLISS_ALLOWED_SKIPS` (a scenario may skip only where it cannot run: SIGTERM and the
+limited SQL login on Windows); skips are always counted. Coverage is measured on Linux only: the tools instrument the backend as a child
 process, and the cancel suite starts it from its build output (`scripts/assurance/backend-dll.sh`).
 
 ## Coverage policy
@@ -89,8 +93,10 @@ process, and the cancel suite starts it from its build output (`scripts/assuranc
    naming the file, the line range, the kind (`line`, `branch` or `both`) and the reason. The gate
    fails on an uncovered item without an entry, and on an entry that no longer matches anything.
 2. **All other backend files and the Lua files**: a ratchet. Coverage may not fall below
-   `coverage-baseline.json`, which is updated only upward (`coverage_report.py --update-baseline`)
-   in the commit that raised it.
+   `coverage-baseline.json`, which is updated only upward (`coverage_report.py --update-baseline`
+   refuses to lower a value unless `--allow-lower` is given, and the commit says why). A measured
+   file that is not in the baseline (a new file) fails the gate until it is added. A justification
+   for a file that is not critical fails too: it would never be read.
 3. **Accepted reasons** for a justification: platform-specific code that CI runs on the other OS
    (named); a defensive branch that the type system or a caller makes unreachable (say how); an
    empty handler for an error that cannot be provoked without privileges (say which). "Hard to
@@ -159,7 +165,7 @@ far it is trusted:
 |---|---|---|
 | `dotnet-coverage` 18.12.0 | C# coverage | cross-checked once: the lines of the cancel re-send loop were reported uncovered, became covered after the test for them was added, and fell back to uncovered when that code was mutated away |
 | luacov 0.15.0 | Lua statement coverage | its totals matched the per-line status the report script reads (323 missed lines both ways); fetched at a pinned tag, not vendored |
-| `trace.py`, `coverage_report.py` | traceability and gate | small, standard-library Python; their checks are exercised by CI failing when they should |
+| `trace.py`, `coverage_report.py`, `mutate.py` | traceability, gate, mutation replay | small, standard-library Python; each check has a self-test that makes it fail (`scripts/assurance/tests/`), run in CI. The inspection that added them found PR-024: until then the traceability matrix overstated its links |
 | `TreatWarningsAsErrors`, `.editorconfig` rules | code standard | the compiler is the oracle |
 
 None of the tools ships with the plugin.
@@ -187,7 +193,7 @@ These are open on purpose and listed so that nobody mistakes the evidence for mo
    Windows-specific process handling run in the Windows CI job without instrumentation.
 4. **SQL Server and PostgreSQL engine code is measured only through the databases in CI**, so a
    change there cannot be checked for coverage on a laptop without them.
-5. **Mutation checks are manual.** Nothing re-runs them.
+5. **Mutation checks are replayed only for the registered ones** (`mutations.json`, from Phase 5; a few earlier critical rules were added). The mutants are written by hand, not generated, so a missing one is a missing check; nothing proposes them.
 6. **Requirements are written after much of the code.** The catalog was derived from the decisions
    documents and the tests, then used to find gaps; it did not drive the original design. The
    formal models are the exception.

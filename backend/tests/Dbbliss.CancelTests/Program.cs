@@ -12,6 +12,11 @@ using Dbbliss.CancelTests;
 //   DBBLISS_TEST_PG,    DBBLISS_TEST_PG_PASSWORD
 //   DBBLISS_TEST_MSSQL, DBBLISS_TEST_MSSQL_PASSWORD
 //   DBBLISS_TEST_DB2I,  DBBLISS_TEST_DB2I_PASSWORD, DBBLISS_TEST_DB2I_SCHEMA   (real IBM i only)
+//
+// CI mode, so that a green run cannot hide a gap:
+//   DBBLISS_REQUIRE_ENGINES=postgres,sqlserver   an engine in the list that is not configured fails the run
+//   DBBLISS_ALLOWED_SKIPS=name,...               with the line above, a scenario that skips and is not
+//                                                named here fails the run (skips are always counted)
 
 var settings = Settings.FromArgs(args);
 var profiles = new List<EngineProfile>();
@@ -25,6 +30,14 @@ AddIfConfigured("DBBLISS_TEST_PG", "DBBLISS_TEST_PG_PASSWORD", (cs, pw) => new P
 AddIfConfigured("DBBLISS_TEST_MSSQL", "DBBLISS_TEST_MSSQL_PASSWORD", (cs, pw) => new SqlServerProfile { ConnectionString = cs, PasswordEnv = pw });
 AddIfConfigured("DBBLISS_TEST_DB2I", "DBBLISS_TEST_DB2I_PASSWORD", (cs, pw) => new Db2iProfile { ConnectionString = cs, PasswordEnv = pw });
 if (settings.Engines is { } only) profiles.RemoveAll(p => !only.Contains(p.Engine));
+
+var required = (Environment.GetEnvironmentVariable("DBBLISS_REQUIRE_ENGINES") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+var allowedSkips = (Environment.GetEnvironmentVariable("DBBLISS_ALLOWED_SKIPS") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+foreach (var engine in required.Where(e => profiles.All(p => p.Engine != e)))
+{
+    Console.Error.WriteLine($"engine {engine} is required (DBBLISS_REQUIRE_ENGINES) but not configured or filtered out");
+    return 2;
+}
 
 if (!File.Exists(settings.BackendPath))
 {
@@ -73,7 +86,16 @@ Console.WriteLine();
 Console.WriteLine(md);
 
 var failed = results.Count(r => r.Outcome == Outcome.Fail);
-Console.WriteLine($"{results.Count} scenarios, {failed} failed");
+var skipped = results.Where(r => r.Outcome == Outcome.Skip).ToList();
+if (required.Length > 0)
+{
+    foreach (var r in skipped.Where(r => !allowedSkips.Contains(r.Scenario)))
+    {
+        Console.Error.WriteLine($"{r.Engine} {r.Scenario} skipped ({r.Detail}) and is not in DBBLISS_ALLOWED_SKIPS");
+        failed++;
+    }
+}
+Console.WriteLine($"{results.Count} scenarios, {failed} failed, {skipped.Count} skipped");
 return failed == 0 && results.Count > 0 ? 0 : 1;
 
 public sealed class Settings

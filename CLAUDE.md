@@ -85,7 +85,7 @@ part without downloading `tla2tools.jar`, point `TLA_JAR` at Apalache's jar
   removed, or justified in `coverage-justifications.json` (named by a snippet of code, with a
   category and a reason). CI job `assurance` enforces it; `scripts/assurance/dotnet-coverage.sh`
   and `lua-coverage.sh` reproduce it on Linux (needs `dotnet-coverage`, luacov is fetched).
-- Show a new test can fail: break the code once and watch it fail, as the commits describe.
+- Show a new test can fail: break the code once and watch it fail. For code that guards a failure condition (FC-1..6) record the mutation in `docs/assurance/mutations.json`; `python3 scripts/assurance/mutate.py` replays them (CI job `mutation`). A change to `scripts/assurance/*.py` needs a self-test in `scripts/assurance/tests/` (run them with `python3 scripts/assurance/tests/test_*.py`). The coverage baseline only moves up (`--update-baseline` refuses to lower; `--allow-lower` needs a reason).
 - The review checklist is `docs/assurance/reviews/review-checklist.md`.
 
 ## Commands

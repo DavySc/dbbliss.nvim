@@ -12,7 +12,9 @@ independence (see `plan.md`, "Independence").
 
 ## Verification
 - [ ] New code is covered by a test or, in a critical file, each uncovered item is justified in `coverage-justifications.json` with a reason a reviewer can check.
-- [ ] A new test was shown able to fail (a mutation of the code, or the test run against the old code).
+- [ ] A new test was shown able to fail: a mutation recorded in `docs/assurance/mutations.json` (`python3 scripts/assurance/mutate.py --id <ID>` kills it) for code that guards FC-1 to FC-6, otherwise the old code or a mutation described in the commit.
+- [ ] A change to `trace.py`, `coverage_report.py` or `mutate.py` comes with a self-test that fails without it (`scripts/assurance/tests/`).
+- [ ] The coverage baseline was not lowered (`--allow-lower` needs a reason in the commit).
 - [ ] Nothing was skipped, disabled or loosened to make CI pass.
 
 ## Safety rules (CLAUDE.md)
@@ -41,3 +43,4 @@ Reviews are recorded in the PR; phase-end reviews by the owner are recorded here
 | Date | Scope | Reviewer | Result |
 |---|---|---|---|
 | 2026-10-09 | Phase 2 (merged to main at 0fb9636) | owner | merge requested by the owner; no review comments recorded (whether `phase2-decisions.md` was read is not on record) |
+| 2026-10-10 | Harness inspection (Phase 5 branch) | author (AI session), for the owner to review | PR-024, PR-025 found and fixed; automated mutation replay, harness self-tests, cancel-suite skip policy, coverage gate hardening added. Not independent |
