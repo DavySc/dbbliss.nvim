@@ -27,6 +27,8 @@ local deps = {
   --- called with (conn_id, conn_name, node) for the object under the cursor
   info = nil, ---@type fun(conn_id: string, conn_name: string, node: dbbliss.TreeNode)?
   script = nil, ---@type fun(conn_id: string, conn_name: string, node: dbbliss.TreeNode)?
+  --- called with (conn_id) when the user asks for a refresh: what was loaded about the schema may be out of date
+  refreshed = nil, ---@type fun(conn_id: string)?
   --- called with (conn_id, conn_name, node) to drop the object or database under the cursor
   drop = nil, ---@type fun(conn_id: string, conn_name: string, node: dbbliss.TreeNode)?
   notify = function(msg, level)
@@ -393,6 +395,9 @@ function M.refresh()
   if not node then
     return M.refresh_all()
   end
+  if deps.refreshed and S.current then
+    deps.refreshed(S.current)
+  end
   local set = open_keys(node.children)
   node.children = nil
   if node.expanded and node.expandable then
@@ -410,6 +415,9 @@ function M.refresh_all()
   local tree = S.current and S.trees[S.current]
   if not tree then
     return
+  end
+  if deps.refreshed then
+    deps.refreshed(S.current)
   end
   local set = open_keys(tree.roots)
   tree.roots = nil

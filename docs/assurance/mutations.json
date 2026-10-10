@@ -47,6 +47,20 @@
         "-l",
         "tests/nvim/client_test.lua"
       ]
+    },
+    "lua-completion": {
+      "build": [
+        "true"
+      ],
+      "test": [
+        "{nvim}",
+        "--headless",
+        "--clean",
+        "--cmd",
+        "set rtp^=.",
+        "-l",
+        "tests/nvim/completion_test.lua"
+      ]
     }
   },
   "mutations": [
@@ -338,6 +352,160 @@
         "plan_done_notification_reaches_the_viewer"
       ],
       "verifies": "LLR-PLAN-11"
+    },
+    {
+      "id": "COMP-1",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "an alias is not recognised as the table it stands for",
+      "find": "if t.alias and same_name(t.alias, qualifier) then",
+      "replace": "if false then",
+      "tests": [
+        "completion_dot_after_a_schema_lists_its_objects_after_a_table_its_columns"
+      ],
+      "verifies": "LLR-COMP-3"
+    },
+    {
+      "id": "COMP-2",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "the cache is not used: every request asks the server",
+      "find": "  if entry and entry.state == 'ready' then\n    return cb(entry)\n  end\n  if entry and entry.state == 'loading' then\n    entry.waiters[#entry.waiters + 1] = cb\n    return\n  end\n  entry = { state = 'loading', waiters = { cb } }\n  cache.names = entry",
+      "replace": "  entry = { state = 'loading', waiters = { cb } }\n  cache.names = entry",
+      "tests": [
+        "completion_answers_from_the_cache_and_never_waits",
+        "completion_requests_that_arrive_during_a_load_share_it"
+      ],
+      "verifies": "LLR-COMP-4"
+    },
+    {
+      "id": "COMP-3",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a reserved word is inserted unquoted on PostgreSQL",
+      "find": "and not RESERVED.postgres[name] then",
+      "replace": "then",
+      "tests": [
+        "completion_inserts_quoted_what_needs_quotes_for_the_engine"
+      ],
+      "verifies": "LLR-COMP-3"
+    },
+    {
+      "id": "COMP-4",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a failed names load is remembered, so completion never recovers",
+      "find": "      if cache.names == entry then\n        cache.names = nil\n      end",
+      "replace": "",
+      "tests": [
+        "completion_a_failed_load_offers_nothing_and_is_retried_later"
+      ],
+      "verifies": "LLR-COMP-4"
+    },
+    {
+      "id": "COMP-5",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "the user is never told that the list was cut at the limit",
+      "find": "if result.truncated and not cache.notified then",
+      "replace": "if false and not cache.notified then",
+      "tests": [
+        "completion_says_once_when_the_list_was_cut_at_the_limit"
+      ],
+      "verifies": "HLR-COMP-1"
+    },
+    {
+      "id": "COMP-6",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "completion offers names inside a string or comment",
+      "find": "if open == 'string' or open == 'comment' then",
+      "replace": "if false then",
+      "tests": [
+        "completion_offers_nothing_inside_strings_and_comments"
+      ],
+      "verifies": "LLR-COMP-3"
+    },
+    {
+      "id": "COMP-7",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a blank line does not end a statement",
+      "find": "if prev:match('^%s*$') then",
+      "replace": "if false then",
+      "tests": [
+        "completion_finds_the_statement_around_the_cursor"
+      ],
+      "verifies": "LLR-COMP-3"
+    },
+    {
+      "id": "COMP-8",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a cache entry outlives an invalidate",
+      "find": "  S.caches[conn_id] = nil\nend\n\n--- The connection is gone.",
+      "replace": "  S.caches[conn_id] = S.caches[conn_id]\nend\n\n--- The connection is gone.",
+      "tests": [
+        "completion_cache_is_dropped_on_invalidate_and_forget"
+      ],
+      "verifies": "LLR-COMP-4"
+    },
+    {
+      "id": "COMP-9",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion/shared.lua",
+      "why": "every buffer counts as SQL for the adapters",
+      "find": "return SQL[filetype] == true",
+      "replace": "return true",
+      "tests": [
+        "completion_blink_adapter_is_thin_and_needs_no_plugin"
+      ],
+      "verifies": "LLR-COMP-5"
+    },
+    {
+      "id": "COMP-10",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a buffer without a connection is completed from nothing instead of answering empty",
+      "find": "  if not conn then\n    return cb({ items = {}, start = col, kind = 'none' })\n  end",
+      "replace": "  if not conn then\n    conn = { id = 'c1', engine = 'postgres' }\n  end",
+      "tests": [
+        "completion_blink_adapter_is_thin_and_needs_no_plugin"
+      ],
+      "verifies": "LLR-COMP-5"
+    },
+    {
+      "id": "COMPB-1",
+      "file": "backend/src/Dbbliss.Backend/Backend.cs",
+      "why": "a limit above 20 000 is honoured (an unbounded list)",
+      "find": "limit = Math.Min(asked, NamesLimit);",
+      "replace": "limit = asked;",
+      "tests": [
+        "completion_names_say_when_they_stopped"
+      ],
+      "verifies": "HLR-COMP-1"
+    },
+    {
+      "id": "COMPB-2",
+      "file": "backend/src/Dbbliss.Backend/Backend.cs",
+      "why": "a limit of 0 is accepted",
+      "find": "!v.TryGetValue<int>(out var asked) || asked < 1",
+      "replace": "!v.TryGetValue<int>(out var asked) || asked < 0",
+      "tests": [
+        "completion_names_say_when_they_stopped"
+      ],
+      "verifies": "HLR-COMP-1"
+    },
+    {
+      "id": "COMPB-3",
+      "file": "backend/src/Dbbliss.Backend/Backend.cs",
+      "why": "include_system is not passed on",
+      "find": "var includeSystem = p[\"include_system\"]?.GetValue<bool>() ?? false;",
+      "replace": "var includeSystem = false;",
+      "tests": [
+        "completion_names_through_the_catalog_session"
+      ],
+      "verifies": "HLR-COMP-1"
     }
   ]
 }

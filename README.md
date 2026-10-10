@@ -189,6 +189,48 @@ backup is of the whole database, also when you drop one table. Nothing is forced
 database with sessions in it is not dropped (end them from `:Dbbliss sessions`); the server's refusal is
 shown as it is.
 
+### Plans
+
+| Command | |
+|---|---|
+| `:Dbbliss plan` | the **estimated** plan of the statement under the cursor (or the range): nothing is run |
+| `:Dbbliss plan actual` | the **actual** plan: the statement is run and then rolled back |
+
+PostgreSQL: `EXPLAIN (FORMAT JSON)` / `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`. SQL Server: `SET SHOWPLAN_XML ON`
+/ `SET STATISTICS XML ON`. The plan opens as a tree: operator, what it works on, cost, rows (estimated →
+actual, with a factor when they are far apart), loops, time, and the hottest node marked (the one with
+the greatest own time, or own cost for an estimate). `<CR>`/`o` collapse a node, `zR`/`zM` all, `x` the raw
+plan, `c` cancels a running plan, `q` closes.
+
+A plan runs on a session of its own, so a temporary table or a `SET` of your session is not visible to it.
+An **actual** plan of anything that is not plainly a read asks first, naming the statement: it runs the statement
+inside a transaction that is always rolled back, so nothing is kept, but sequence values, calls to the outside
+and locks held while it runs are not undone. Answer No and nothing is sent.
+
+### Completion
+
+Table, view, function and procedure names after `FROM`, `JOIN`, `UPDATE`, `INTO` and the like; the objects
+of a schema after `schema.`; columns after `alias.` or `table.`, and the columns of the statement's tables
+elsewhere. Names that need quotes are inserted quoted. The names come from the catalog and are cached per
+connection (up to 20 000; you are told when the list was cut); the cache is dropped on disconnect and when
+the schema tree is refreshed (`R`), so **after DDL, refresh the tree**. Completion never waits for the
+server: the first request starts the load and the items appear when it ends.
+
+It is a completion *source*; the plugin does not need blink.cmp or nvim-cmp, and offers an adapter for each:
+
+```lua
+-- blink.cmp
+sources = { default = { 'lsp', 'path', 'dbbliss' },
+            providers = { dbbliss = { name = 'dbbliss', module = 'dbbliss.completion.blink' } } }
+
+-- nvim-cmp
+require('cmp').register_source('dbbliss', require('dbbliss.completion.cmp').new())
+-- and { name = 'dbbliss' } in the sources of the sql filetype
+```
+
+Not offered: keywords, parameters, columns of subqueries and CTEs. The adapters were written against the
+plugins' documented interfaces and are not tested against the plugins themselves.
+
 ### Results
 
 Results go to the `dbbliss://results` buffer as aligned tables (column widths from the first rows,
@@ -224,11 +266,13 @@ dotnet run --project backend/tests/Dbbliss.CancelTests
 
 # No database needed:
 dotnet run --project backend/tests/Dbbliss.ProtocolTests
-nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua
+nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua   # also: results, catalog, sessions, management, plan, completion
+python3 scripts/assurance/trace.py --check      # requirements <-> tests
+python3 scripts/assurance/mutate.py             # replays the recorded mutation checks (needs the .NET SDK; NVIM=... for the Lua ones)
 ```
 
 The cancel suite drives the real backend (and a real headless Neovim for the "Neovim closed"
 scenarios) and checks the server from an independent connection. DB2 for i (deferred) runs only
 when `DBBLISS_TEST_DB2I` is set; see [docs/db2i-checklist.md](docs/db2i-checklist.md).
 
-Decisions to review: [docs/phase0-decisions.md](docs/phase0-decisions.md).
+Decisions to review: [docs/phase0-decisions.md](docs/phase0-decisions.md), and per phase `docs/phase*-decisions.md` (Phase 5: 61–67).

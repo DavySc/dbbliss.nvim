@@ -6,12 +6,21 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 ## Status (2026-10-10)
 
-**Phase 4 (backup, drop, progress window) is implemented on branch `ccr-48313f28-j61iv5`; not merged into
-`main`: stop for the user's review.** Built spec-first (`HLR-MGT-1..11`, `LLR-MGT-18`) with a model,
-`spec/tla/Operations.tla`. Decisions to review: `docs/phase4-decisions.md` (51–60). Code: `Management/`
-(backend), `management.lua` (Lua); tests in `ManagementTests.cs`, `ManagementEngineTests.cs`,
-`ManagementScenarios.cs`, `tests/nvim/management_test.lua`. The cancel suite needs `pg_dump` and
-`pg_restore` of the server's version (`DBBLISS_TEST_PG_BIN`; CI installs the 17 client).
+**Phase 5 (plan viewer, completion) is implemented on branch `ccr-48313f28-j61iv5`; not merged into
+`main`: stop for the user's review.** Built spec-first (`HLR-PLAN-1..8`, `LLR-PLAN-9..12`, `HLR-COMP-1`,
+`LLR-COMP-2..5`) with `spec/tla/Operations.tla` extended for plans. Decisions to review:
+`docs/phase5-decisions.md` (61–67, including what was not checked). Code: `Plans/` (backend),
+`plan.lua`, `completion.lua`, `completion/{blink,cmp,shared}.lua` (Lua); tests in `PlanParserTests.cs`,
+`PlanTests.cs`, `PlannerTests.cs`, `CompletionTests.cs`, `PlanScenarios.cs`, `CompletionScenarios.cs`,
+`tests/nvim/plan_test.lua`, `tests/nvim/completion_test.lua`. The blink.cmp / nvim-cmp adapters are
+tested against the documented contract only (neither plugin is installed). The phase began with a harness
+inspection (decision 67, PR-024, PR-025): mutation checks are now recorded in
+`docs/assurance/mutations.json` and replayed by `scripts/assurance/mutate.py` (CI job `mutation`).
+
+**Phase 4 (backup, drop, progress window) is complete and on `main`.** Decisions:
+`docs/phase4-decisions.md` (51–60). Code: `Management/` (backend), `management.lua` (Lua). The cancel
+suite needs `pg_dump` and `pg_restore` of the server's version (`DBBLISS_TEST_PG_BIN`; CI installs the 17
+client).
 
 **Phase 3 (sessions: list, cancel statement, terminate, rollback status) is complete and on `main`.**
 Decisions: `docs/phase3-decisions.md` (43–50). Code: `Sessions/` (backend), `sessions.lua` (Lua).

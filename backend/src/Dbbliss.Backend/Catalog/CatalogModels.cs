@@ -73,6 +73,24 @@ public sealed record ObjectInfo(string Title, string Kind, IReadOnlyList<InfoSec
     };
 }
 
+/// <summary>One name for completion: a table, view, function or procedure.</summary>
+/// <param name="Kind">table | view | function | procedure</param>
+public sealed record NameEntry(string Schema, string Name, string Kind)
+{
+    public JsonObject ToJson() => new() { ["schema"] = Schema, ["name"] = Name, ["kind"] = Kind };
+}
+
+/// <summary>The names of a database for completion. <paramref name="Truncated"/>: there were more than the limit and the rest is not here.</summary>
+public sealed record CatalogNames(IReadOnlyList<NameEntry> Items, bool Truncated);
+
+public sealed record ColumnEntry(string Name, string Type)
+{
+    public JsonObject ToJson() => new() { ["name"] = Name, ["type"] = Type };
+}
+
+/// <summary>The columns of one table or view, with the name the server resolved it to.</summary>
+public sealed record TableColumns(string Schema, string Name, IReadOnlyList<ColumnEntry> Columns);
+
 /// <summary>A catalog operation the user can fix: the name matched nothing, or matched too much.</summary>
 public sealed class CatalogException(string message) : Exception(message);
 
@@ -93,4 +111,14 @@ public interface ICatalog
 
     /// <summary>A CREATE script for the object.</summary>
     Task<string> ScriptAsync(IEngineSession session, ObjectRequest request, CancellationToken ct);
+
+    /// <summary>
+    /// The tables, views, functions and procedures of a database (null: the session's own), for completion: at most
+    /// <paramref name="limit"/>, in schema and name order, <see cref="CatalogNames.Truncated"/> set when there were more.
+    /// System schemas only when asked.
+    /// </summary>
+    Task<CatalogNames> NamesAsync(IEngineSession session, string? database, bool includeSystem, int limit, CancellationToken ct);
+
+    /// <summary>The columns of a table or view the server resolves (<see cref="CatalogException"/> when it is none).</summary>
+    Task<TableColumns> ColumnsAsync(IEngineSession session, ObjectRequest request, CancellationToken ct);
 }

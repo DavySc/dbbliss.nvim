@@ -27,7 +27,14 @@
     "backend/src/Dbbliss.Backend/Management/OperationManager.cs",
     "backend/src/Dbbliss.Backend/Management/PostgresManagement.cs",
     "backend/src/Dbbliss.Backend/Management/SqlServerManagement.cs",
-    "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs"
+    "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs",
+    "backend/src/Dbbliss.Backend/Plans/PlanModels.cs",
+    "backend/src/Dbbliss.Backend/Plans/PostgresPlanParser.cs",
+    "backend/src/Dbbliss.Backend/Plans/SqlServerPlanParser.cs",
+    "backend/src/Dbbliss.Backend/Plans/PostgresPlanner.cs",
+    "backend/src/Dbbliss.Backend/Plans/SqlServerPlanner.cs",
+    "backend/src/Dbbliss.Backend/Plans/PlannerSupport.cs",
+    "backend/src/Dbbliss.Backend/Management/ControlledExecution.cs"
   ],
   "ignore_artifacts": [
     {

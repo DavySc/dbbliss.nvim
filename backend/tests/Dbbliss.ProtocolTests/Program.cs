@@ -86,7 +86,7 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("cancel_is_resent_and_unacknowledged_cancel_warns", "", CancelIsResentAndWarns),
     // Verifies: HLR-CONC-1
     ("second_operation_is_busy", "", SecondOperationIsBusy),
-    // Verifies: LLR-CAT-9, LLR-ADM-10
+    // Verifies: LLR-CAT-9, LLR-ADM-10, LLR-COMP-2
     ("catalog_sql_has_no_dedup_keywords", "", () => { CatalogSqlRules.NoDedupKeywords(); return Task.CompletedTask; }),
     // Verifies: LLR-CONC-2
     ("execute_right_after_query_done", "lease released too late", ExecuteRightAfterQueryDone),
@@ -126,6 +126,14 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("catalog_errors", "", CatalogTests.Errors),
     // Verifies: HLR-CAT-1, HLR-CAT-3
     ("catalog_shapes", "", CatalogTests.DescribeAndScriptShapes),
+    // Verifies: HLR-COMP-1
+    ("completion_names_through_the_catalog_session", "", CompletionTests.NamesAreListedThroughTheCatalogSession),
+    // Verifies: HLR-COMP-1
+    ("completion_names_say_when_they_stopped", "", CompletionTests.NamesSayWhenTheyStoppedAtTheLimit),
+    // Verifies: HLR-COMP-1
+    ("completion_columns_of_a_resolved_table", "", CompletionTests.ColumnsOfATableTheServerResolves),
+    // Verifies: HLR-COMP-1
+    ("completion_failures_and_missing_support", "", CompletionTests.FailuresAndMissingSupportAreReported),
     // Verifies: HLR-ADM-1
     ("sessions_list_shape", "", SessionTests.ListShape),
     // Verifies: HLR-ADM-6

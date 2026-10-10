@@ -416,4 +416,48 @@ public sealed class PostgresCatalog : ICatalog
             throw new CatalogException($"This connection is to database {current}; {database} can only be browsed by connecting to it.");
         }
     }
+
+    // Completion ----------------------------------------------------------------------------------
+
+    public async Task<CatalogNames> NamesAsync(IEngineSession s, string? database, bool includeSystem, int limit, CancellationToken ct)
+    {
+        if (database is not null) await RequireCurrentDatabase(s, database, ct);
+        // One more than the limit, so "exactly the limit" is told from "there was more".
+        var t = await First(s, """
+            SELECT x.schema, x.name, x.kind FROM (
+                SELECT n.nspname AS schema, c.relname AS name, CASE WHEN c.relkind IN ('v', 'm') THEN 'view' ELSE 'table' END AS kind
+                FROM pg_class c
+                JOIN pg_namespace n ON n.oid = c.relnamespace
+                WHERE c.relkind IN ('r', 'p', 'f', 'v', 'm') AND n.nspname !~ '^pg_(toast|temp)' AND has_schema_privilege(n.oid, 'USAGE')
+                  AND (@system OR NOT (n.nspname = 'information_schema' OR left(n.nspname, 3) = 'pg_'))
+                UNION ALL
+                SELECT n.nspname, p.proname, CASE p.prokind WHEN 'p' THEN 'procedure' ELSE 'function' END
+                FROM pg_proc p
+                JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE p.prokind IN ('f', 'p') AND n.nspname !~ '^pg_(toast|temp)' AND has_schema_privilege(n.oid, 'USAGE')
+                  AND (@system OR NOT (n.nspname = 'information_schema' OR left(n.nspname, 3) = 'pg_'))
+                  AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+            ) x
+            ORDER BY x.schema, x.name, x.kind
+            LIMIT @limit
+            """, new Dictionary<string, object?> { ["system"] = includeSystem, ["limit"] = limit + 1 }, ct);
+        var items = t.Rows.Take(limit).Select(r => new NameEntry(Str(r[0])!, Str(r[1])!, Str(r[2])!)).ToList();
+        return new CatalogNames(items, t.Rows.Count > limit);
+    }
+
+    public async Task<TableColumns> ColumnsAsync(IEngineSession s, ObjectRequest req, CancellationToken ct)
+    {
+        var t = await ResolveAsync(s, req, ct);
+        if (t.RelKind is not ("r" or "p" or "f" or "v" or "m"))
+        {
+            throw new CatalogException($"{t.Schema}.{t.Name} is a {t.Kind}, which has no columns to complete.");
+        }
+        var columns = await First(s, """
+            SELECT a.attname AS name, format_type(a.atttypid, a.atttypmod) AS type
+            FROM pg_attribute a
+            WHERE a.attrelid = @oid::oid AND a.attnum > 0 AND NOT a.attisdropped
+            ORDER BY a.attnum
+            """, new Dictionary<string, object?> { ["oid"] = t.Oid }, ct);
+        return new TableColumns(t.Schema, t.Name, columns.Rows.Select(r => new ColumnEntry(Str(r[0])!, Str(r[1])!)).ToList());
+    }
 }

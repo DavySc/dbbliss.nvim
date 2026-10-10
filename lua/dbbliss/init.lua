@@ -9,6 +9,7 @@ local tree = require('dbbliss.tree')
 local sessions = require('dbbliss.sessions')
 local management = require('dbbliss.management')
 local plan = require('dbbliss.plan')
+local completion = require('dbbliss.completion')
 
 local M = {}
 
@@ -142,6 +143,9 @@ function M.setup(opts)
     drop = function(_, conn_name, node)
       M._drop_node(conn_name, node)
     end,
+    refreshed = function(conn_id)
+      completion.invalidate(conn_id)
+    end,
     show_system = state.config.tree.show_system,
   })
   sessions.setup({
@@ -161,6 +165,15 @@ function M.setup(opts)
       M._catalog_request(conn_id, method, params, cb)
     end,
     notify = notify,
+  })
+  completion.setup({
+    request = function(conn_id, method, params, cb)
+      M._catalog_request(conn_id, method, params, cb)
+    end,
+    notify = notify,
+    connection_for = function(bufnr)
+      return M._completion_connection(bufnr)
+    end,
   })
   M._apply_mappings()
   results.setup({
@@ -191,6 +204,7 @@ local function on_backend_exit(code, signal)
   state.connecting = {}
   state.current = nil
   state.backend = nil
+  completion.reset()
   refresh()
   if had or code ~= 0 then
     notify(('backend exited (code %d, signal %d); all connections are gone'):format(code, signal), vim.log.levels.ERROR)
@@ -614,6 +628,18 @@ function M.run(scope, range)
   end)
 end
 
+--- The connection completion reads from for a buffer: the one it last ran on, else the current one.
+---@param bufnr integer
+---@return { id: string, engine: string }?
+function M._completion_connection(bufnr)
+  local name = vim.api.nvim_buf_is_valid(bufnr) and vim.b[bufnr].dbbliss_connection or nil
+  local conn = (name and state.connections[name]) or (state.current and state.connections[state.current])
+  if not conn then
+    return nil
+  end
+  return { id = conn.id, engine = conn.engine }
+end
+
 --- Plans the statement under the cursor (or a range holding one statement) on a session of the
 --- backend's own and shows the plan. An actual plan runs the statement and rolls it back: the plan
 --- module asks first unless the statement is plainly a read.
@@ -766,6 +792,7 @@ function M.disconnect()
         return
       end
       tree.forget(id)
+      completion.forget(id)
       local n = connection_by_id(id)
       if n then
         state.connections[n] = nil

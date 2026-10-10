@@ -465,4 +465,39 @@ public sealed class SqlServerCatalog : ICatalog
         }
         return script.ToString();
     }
+
+    // Completion ----------------------------------------------------------------------------------
+
+    public async Task<CatalogNames> NamesAsync(IEngineSession s, string? database, bool includeSystem, int limit, CancellationToken ct)
+    {
+        // One more than the limit, so "exactly the limit" is told from "there was more".
+        var t = await RunFirst(s, database, """
+            SELECT TOP (@limit) sc.name AS [schema], o.name AS name,
+                   CASE WHEN o.type = 'U' THEN 'table' WHEN o.type = 'V' THEN 'view' WHEN o.type IN ('P', 'PC') THEN 'procedure' ELSE 'function' END AS kind
+            FROM sys.all_objects o
+            JOIN sys.schemas sc ON sc.schema_id = o.schema_id
+            WHERE o.type IN ('U', 'V', 'P', 'PC', 'FN', 'IF', 'TF', 'FS', 'FT')
+              AND (@system = 1 OR (o.is_ms_shipped = 0 AND sc.name NOT IN ('sys', 'INFORMATION_SCHEMA')))
+            ORDER BY sc.name, o.name
+            """, new Dictionary<string, object?> { ["system"] = includeSystem ? 1 : 0, ["limit"] = limit + 1 }, ct);
+        var items = t.Rows.Take(limit).Select(r => new NameEntry(Str(r[0])!, Str(r[1])!, Str(r[2])!)).ToList();
+        return new CatalogNames(items, t.Rows.Count > limit);
+    }
+
+    public async Task<TableColumns> ColumnsAsync(IEngineSession s, ObjectRequest req, CancellationToken ct)
+    {
+        var t = await ResolveAsync(s, req, ct);
+        if (t.Kind is not ("table" or "view"))
+        {
+            throw new CatalogException($"{t.Schema}.{t.Name} is a {t.Kind}, which has no columns to complete.");
+        }
+        var columns = await RunFirst(s, t.Database, $"""
+            SELECT c.name, {TypeSql("ty", "c")} AS type
+            FROM sys.columns c
+            JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+            WHERE c.object_id = @id
+            ORDER BY c.column_id
+            """, new Dictionary<string, object?> { ["id"] = (int)t.Id }, ct);
+        return new TableColumns(t.Schema, t.Name, columns.Rows.Select(r => new ColumnEntry(Str(r[0])!, Str(r[1])!)).ToList());
+    }
 }

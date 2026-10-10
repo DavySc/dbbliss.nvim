@@ -175,6 +175,17 @@ public sealed class Backend
             "catalog/describe" => new Reply(await CatalogAsync(p, async (cat, session, ct) => (await cat.DescribeAsync(session, ObjectOf(p), ct)).ToJson())),
             "catalog/script" => new Reply(await CatalogAsync(p, async (cat, session, ct) =>
                 new JsonObject { ["text"] = await cat.ScriptAsync(session, ObjectOf(p), ct) })),
+            "catalog/names" => new Reply(await NamesAsync(p)),
+            "catalog/columns" => new Reply(await CatalogAsync(p, async (cat, session, ct) =>
+            {
+                var t = await cat.ColumnsAsync(session, ObjectOf(p), ct);
+                return new JsonObject
+                {
+                    ["schema"] = t.Schema,
+                    ["name"] = t.Name,
+                    ["columns"] = new JsonArray(t.Columns.Select(c => (JsonNode)c.ToJson()).ToArray()),
+                };
+            })),
             "sessions/list" => new Reply(await SessionsAsync(p, null, ListSessionsAsync)),
             "sessions/cancel" => new Reply(await SessionsAsync(p, TargetOf(p), CancelSessionAsync)),
             "sessions/terminate" => new Reply(await SessionsAsync(p, TargetOf(p), TerminateSessionAsync)),
@@ -606,6 +617,34 @@ public sealed class Backend
         var path = new CatalogPath(OptStr(p, "database"), OptStr(p, "schema"), OptStr(p, "folder"));
         var nodes = await catalog.ChildrenAsync(session, path, ct);
         return new JsonObject { ["nodes"] = new JsonArray(nodes.Select(n => (JsonNode)n.ToJson()).ToArray()) };
+    }
+
+    /// <summary>The most names completion asks for; a database with more is reported as truncated, never cut silently.</summary>
+    private const int NamesLimit = 20000;
+
+    private async Task<JsonObject> NamesAsync(JsonObject p)
+    {
+        var limit = NamesLimit;
+        if (p["limit"] is { } l)
+        {
+            if (l is not JsonValue v || !v.TryGetValue<int>(out var asked) || asked < 1)
+            {
+                throw new RpcException(RpcErrors.InvalidParams, "limit must be a positive integer.");
+            }
+            limit = Math.Min(asked, NamesLimit);
+        }
+        var includeSystem = p["include_system"]?.GetValue<bool>() ?? false;
+        var database = OptStr(p, "database");
+        return await CatalogAsync(p, async (cat, session, ct) =>
+        {
+            var names = await cat.NamesAsync(session, database, includeSystem, limit, ct);
+            return new JsonObject
+            {
+                ["names"] = new JsonArray(names.Items.Select(n => (JsonNode)n.ToJson()).ToArray()),
+                ["truncated"] = names.Truncated,
+                ["limit"] = limit,
+            };
+        });
     }
 
     private static ObjectRequest ObjectOf(JsonObject p)

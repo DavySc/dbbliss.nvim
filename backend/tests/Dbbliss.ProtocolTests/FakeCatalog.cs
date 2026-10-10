@@ -43,6 +43,26 @@ public sealed class FakeCatalog : ICatalog
         return Task.FromResult($"CREATE TABLE {request.Typed ?? request.Name} ();\n");
     }
 
+    /// <summary>What the last names request asked for, so a test sees what the backend passed on.</summary>
+    public (string? Database, bool IncludeSystem, int Limit)? LastNames { get; private set; }
+
+    public Task<CatalogNames> NamesAsync(IEngineSession session, string? database, bool includeSystem, int limit, CancellationToken ct)
+    {
+        SessionsUsed.Add(session.ServerSessionId);
+        LastNames = (database, includeSystem, limit);
+        if (database == "crash") throw new InvalidOperationException("the driver broke");
+        var all = new List<NameEntry> { new("public", "orders", "table"), new("public", "order_view", "view"), new("sales", "fn_total", "function") };
+        if (includeSystem) all.Add(new NameEntry("pg_catalog", "pg_class", "table"));
+        return Task.FromResult(new CatalogNames(all.Take(limit).ToList(), all.Count > limit));
+    }
+
+    public Task<TableColumns> ColumnsAsync(IEngineSession session, ObjectRequest request, CancellationToken ct)
+    {
+        SessionsUsed.Add(session.ServerSessionId);
+        Steer(request);
+        return Task.FromResult(new TableColumns("public", request.Typed ?? request.Name!, [new ColumnEntry("id", "integer"), new ColumnEntry("note", "text")]));
+    }
+
     private static void Steer(ObjectRequest request)
     {
         var name = request.Typed ?? request.Name;

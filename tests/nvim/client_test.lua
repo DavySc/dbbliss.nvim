@@ -600,6 +600,42 @@ local tests = {
       plan._state.ops.px = nil
     end,
   },
+  {
+    -- Verifies: LLR-COMP-4
+    'completion_cache_is_dropped_on_disconnect_and_on_a_tree_refresh',
+    '',
+    function()
+      script_setup({ 'select 1;' })
+      local completion = require('dbbliss.completion')
+      local tree = require('dbbliss.tree')
+      completion._state.caches['c1'] = { columns = {} }
+      tree._state.trees['c1'] = { roots = {} }
+      tree._state.current = 'c1'
+      tree.refresh_all()
+      expect(completion._state.caches['c1'] == nil, 'a refresh of the schema tree drops the cache')
+      take('catalog/children')
+      completion._state.caches['c1'] = { columns = {} }
+      dbbliss.disconnect()
+      take('disconnect').cb(nil, { rolled_back = false })
+      expect(completion._state.caches['c1'] == nil, 'a disconnect drops the cache')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-5
+    'completion_reads_from_the_buffers_connection_or_the_current_one',
+    '',
+    function()
+      script_setup({ 'select 1;' })
+      local b = vim.api.nvim_get_current_buf()
+      local conn = dbbliss._completion_connection(b)
+      expect(conn and conn.id == 'c1' and conn.engine == 'postgres', 'the current connection: ' .. vim.inspect(conn))
+      vim.b[b].dbbliss_connection = 'nowhere'
+      expect(dbbliss._completion_connection(b).id == 'c1', 'a buffer pointing at a connection that is gone falls back to the current one')
+      dbbliss._state.current = nil
+      expect(dbbliss._completion_connection(b) == nil, 'no connection, no completion')
+      expect(dbbliss._completion_connection(99999) == nil, 'a buffer that is gone')
+    end,
+  },
 }
 
 local failed = 0
