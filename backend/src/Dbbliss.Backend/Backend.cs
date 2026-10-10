@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Management;
+using Dbbliss.Backend.Plans;
 using Dbbliss.Backend.Sessions;
 using Dbbliss.Backend.Engines;
 using Dbbliss.Backend.Rpc;
@@ -180,7 +181,9 @@ public sealed class Backend
             "sessions/status" => new Reply(await SessionsAsync(p, TargetOf(p), SessionStatusAsync)),
             "backup/defaults" => new Reply(await BackupDefaultsAsync(p)),
             "backup/start" => await StartBackupAsync(p),
-            "backup/cancel" => new Reply(new JsonObject { ["state"] = _operations.Cancel(Str(p, "backup_id")) }),
+            "backup/cancel" => new Reply(new JsonObject { ["state"] = _operations.Cancel(Str(p, "backup_id"), "backup") }),
+            "plan/start" => StartPlan(p),
+            "plan/cancel" => new Reply(new JsonObject { ["state"] = _operations.Cancel(Str(p, "plan_id"), "plan") }),
             "management/drop" => new Reply(await DropAsync(p)),
             "transaction/begin" => await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)),
             "transaction/commit" => await TransactionAsync(p, (s, ct) => s.CommitAsync(ct)),
@@ -726,6 +729,31 @@ public sealed class Backend
         var (id, start) = await GuardedAsync(connection, () => _operations.StartBackupAsync(target, request));
         // The backup starts after the response is written, so the client knows its id before any progress.
         return new Reply(new JsonObject { ["backup_id"] = id }, After: start);
+    }
+
+    private Reply StartPlan(JsonObject p)
+    {
+        var connection = GetConnection(p);
+        var planner = connection.Engine.Planner
+            ?? throw new RpcException(RpcErrors.InvalidParams, $"{connection.Engine.Name} has no plan support yet.");
+        var sql = Str(p, "sql");
+        var mode = Str(p, "mode") switch
+        {
+            "estimated" => PlanMode.Estimated,
+            "actual" => PlanMode.Actual,
+            var other => throw new RpcException(RpcErrors.InvalidParams, $"Unknown plan mode {other}. Known: estimated, actual."),
+        };
+        var request = new PlanRequest(sql, mode, p["confirm_execute"]?.GetValue<bool>() ?? false);
+        try
+        {
+            var (id, start) = _operations.StartPlan(connection.Id, new ManagementContext(connection.Engine, connection.Spec, connection.Env), planner, request);
+            // The plan starts after the response is written, so the client knows its id before the first notification.
+            return new Reply(new JsonObject { ["plan_id"] = id }, After: start);
+        }
+        catch (ManagementException ex)
+        {
+            throw new RpcException(RpcErrors.Management, ex.Message);
+        }
     }
 
     private static readonly string[] DropKinds = ["database", "table", "view", "function", "procedure"];

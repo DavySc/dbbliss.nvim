@@ -1,6 +1,7 @@
 using System.Globalization;
 using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Management;
+using Dbbliss.Backend.Plans;
 using Dbbliss.Backend.Sessions;
 using Npgsql;
 
@@ -25,6 +26,8 @@ public sealed class PostgresEngine(Instances instances) : IEngine
     public ICatalog? Catalog { get; } = new PostgresCatalog();
 
     public ISessionAdmin? Sessions { get; } = new PostgresSessions();
+
+    public IPlanner? Planner { get; } = new PostgresPlanner();
 
     public IManagement? Management { get; } = new PostgresManagement(ProcessRunner.Default);
 

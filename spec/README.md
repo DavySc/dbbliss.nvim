@@ -24,10 +24,10 @@ the database server. Rows are not counted. Loss is tracked by the only actions t
 | `NoRefire.cfg` | protocol cancel sent once | liveness: a cancel before the statement is on the wire is lost |
 | `NoConnCheck.cfg` | no `client_connection_check_interval` | liveness: a killed backend leaves the query running |
 
-## `tla/Operations.tla`: a backup next to disconnect, shutdown and a drop
+## `tla/Operations.tla`: a backup or a plan next to disconnect, shutdown and a drop
 
-Phase 4. One connection, one database, one long operation (a backup: `pg_dump` as a child process, or
-`BACKUP DATABASE` on a session of its own), and the things that can end its world. Boolean constants select
+Phases 4 and 5. One connection, one database, one long operation (a backup: `pg_dump` as a child process, or
+`BACKUP DATABASE` on a session of its own; or a plan, whose actual form runs the user's statement on a session of its own), and the things that can end its world. Boolean constants select
 design variants, as in `QueryLifecycle.tla`.
 
 | Config | Design | Result |
@@ -38,6 +38,8 @@ design variants, as in `QueryLifecycle.tla`.
 | `Ops_NoShutdownCancel.cfg` | shutdown does not cancel the tool | `NoOrphanTool` (a `pg_dump` outlives the backend) |
 | `Ops_NoBackupRule.cfg` | a prod drop needs no backup | `ProdDropBacked` |
 | `Ops_StaleBackupCounts.cfg` | a backup that has gone stale (time passed) still counts | `ProdDropBacked` |
+| `Ops_PlanAutocommit.cfg` | an actual plan runs its statement without a transaction to roll back (Phase 5) | `PlanNeverCommits` |
+| `Ops_PlanNoConfirm.cfg` | an actual plan runs a writing statement without the caller's confirmation (Phase 5) | `NoUnconfirmedWritePlan` |
 
 Not modelled: a *killed* backend (nothing ties `pg_dump` to its parent; `docs/phase4-decisions.md`, 55).
 

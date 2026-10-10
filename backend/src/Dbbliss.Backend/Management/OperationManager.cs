@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using Dbbliss.Backend.Plans;
 using Dbbliss.Backend.Rpc;
+using Dbbliss.Backend.Scripts;
 
 namespace Dbbliss.Backend.Management;
 
@@ -158,12 +160,13 @@ public sealed class OperationManager(Output output)
         await notifier.SendAsync("backup/done", done, () => Release(op));
     }
 
+    /// <param name="kind">backup or plan: an id of the other kind is not found.</param>
     /// <returns>cancelling, or finished if it had ended already.</returns>
-    public string Cancel(string backupId)
+    public string Cancel(string id, string kind)
     {
-        if (!_operations.TryGetValue(backupId, out var op) || op.Kind != "backup")
+        if (!_operations.TryGetValue(id, out var op) || op.Kind != kind)
         {
-            throw new RpcException(RpcErrors.InvalidParams, $"Unknown backup {backupId}.");
+            throw new RpcException(RpcErrors.InvalidParams, $"Unknown {kind} {id}.");
         }
         lock (_gate)
         {
@@ -172,6 +175,65 @@ public sealed class OperationManager(Output output)
         }
         op.Cts.Cancel();
         return "cancelling";
+    }
+
+    /// <summary>
+    /// Registers a plan and returns its id and the action that starts it (after the response is written). An actual
+    /// plan runs the statement, so one that is not plainly a read needs the caller's word that the user agreed.
+    /// </summary>
+    public (string Id, Action Start) StartPlan(string connectionId, ManagementContext context, IPlanner planner, PlanRequest request)
+    {
+        if (request.Mode == PlanMode.Actual && !request.ConfirmExecute
+            && StatementClassifier.Classify(request.Sql, context.Engine.Dialect) == StatementKind.Write)
+        {
+            throw new ManagementException("An actual plan runs the statement (inside a transaction that is rolled back), and this one may change data or has effects a rollback does not undo. Ask the user, then pass confirm_execute.");
+        }
+        var op = Register("plan", connectionId, "");
+        return (op.Id, () => op.Task = RunPlanAsync(op, context, planner, request));
+    }
+
+    private async Task RunPlanAsync(Operation op, ManagementContext context, IPlanner planner, PlanRequest request)
+    {
+        await Task.Yield();
+        var notifier = new SequentialNotifier(output);
+        string status;
+        string? error = null;
+        IReadOnlyList<PlanDocument> plans = [];
+        try
+        {
+            plans = await planner.PlanAsync(context, request, op.Cts.Token);
+            if (plans.Count == 0) throw new OperationFailedException("The server returned no plan.");
+            status = "completed";
+        }
+        catch (Exception ex) when (op.Cts.IsCancellationRequested)
+        {
+            _ = ex;
+            status = "cancelled";
+            plans = [];
+        }
+        catch (Exception ex) when (ex is OperationFailedException or ManagementException)
+        {
+            status = "failed";
+            error = ex.Message;
+        }
+        catch (Exception ex)
+        {
+            status = "failed";
+            error = context.Engine.DescribeError(ex).Message;
+            Log.Error($"plan {op.Id}: {ex}");
+        }
+        op.FinishedAt = Stopwatch.GetTimestamp();
+        op.Status = status;
+        Log.Info($"plan {op.Id} {status}{(error is null ? "" : ": " + error)}");
+        var done = new JsonObject
+        {
+            ["plan_id"] = op.Id,
+            ["connection_id"] = op.ConnectionId,
+            ["status"] = status,
+            ["plans"] = new JsonArray(plans.Select(p => (JsonNode)p.ToJson()).ToArray()),
+            ["error"] = error,
+        };
+        await notifier.SendAsync("plan/done", done, () => Release(op));
     }
 
     /// <summary>

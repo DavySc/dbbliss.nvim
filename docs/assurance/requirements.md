@@ -432,6 +432,105 @@ The process runner shall deliver output lines as they arrive, keep the end of th
 the whole process tree on cancel, and report a missing executable as an error, not a crash. Source:
 HLR-MGT-5, HLR-MGT-6.
 
+## Plans (Phase 5)
+
+### HLR-PLAN-1
+`plan/start` shall run on a session of its own, never the user's session or transaction, and end with
+exactly one `plan/done` that carries the plan or the reason there is none. Source: phase 5 plan;
+decision 61.
+
+### HLR-PLAN-2
+PostgreSQL: an estimated plan is `EXPLAIN (FORMAT JSON)`, which does not run the statement; an actual
+plan is `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`. SQL Server: estimated is `SET SHOWPLAN_XML ON`
+(not run), actual is `SET STATISTICS XML ON` (run, its result sets discarded). Source: phase 5 plan.
+
+### HLR-PLAN-3
+An actual plan runs the statement. It shall run in a transaction of the plan session that is rolled
+back at the end (completed, failed or cancelled), so that nothing it changed is ever committed by the
+backend. Verified by model (`PlanNeverCommits`, `PlanEndsUndone`) and by a scenario that runs an
+INSERT, an UPDATE and a DELETE under an actual plan and counts the rows. Source: priorities (no
+surprise commits); decision 62.
+
+### HLR-PLAN-4
+An actual plan of a statement that is not plainly a read (`StatementClassifier`) shall be refused
+(1009) unless the caller says `confirm_execute = true`; the plugin sets it only after asking the
+user, who is told the statement will be run. Estimated plans never need it. Verified by model
+(`NoUnconfirmedWritePlan`). Source: priorities; decision 62.
+
+### HLR-PLAN-5
+`plan/cancel` shall stop a running plan with the protocol-level cancel and report `cancelled`, the
+transaction rolled back. Source: HLR-CANCEL-1.
+
+### HLR-PLAN-6
+A plan counts as an operation of its connection: it is refused while another operation runs, it
+refuses disconnect while it runs, and shutdown cancels it and waits. Verified by model and tests as
+HLR-MGT-7 and HLR-MGT-11. Source: decision 61.
+
+### HLR-PLAN-7
+A plan shall be an engine-neutral tree whose nodes carry the operator, what it works on, estimated
+rows, estimated cost, and for an actual plan the rows it produced, its loops and its time; each node's
+own cost (and time), which is the node's minus its children's and never negative; the hottest node
+(greatest own time for an actual plan, own cost for an estimated one); and for the whole plan its
+totals. Source: phase 5 plan; decision 63.
+
+### HLR-PLAN-8
+Output that holds no plan, or that cannot be read, shall end the plan as `failed` with a message, never
+as an empty plan. A SQL Server batch of several statements shall give one plan per statement.
+Source: priorities (no silent failures).
+
+### LLR-PLAN-9
+The PostgreSQL plan reader shall take operator, relation, alias, index, join type and the conditions
+(filter, index, hash, merge, join) from the JSON, estimated rows from "Plan Rows", actual rows as
+"Actual Rows" times "Actual Loops", time as "Actual Total Time" times loops, and buffers read and hit.
+Source: decision 63.
+
+### LLR-PLAN-10
+The SQL Server plan reader shall take each RelOp's physical and logical operator, object and
+predicate, rows from `RunTimeCountersPerThread` summed over threads, time as the greatest
+`ActualElapsedms` of any thread, and warnings. Own time is the node's minus its children's (row mode;
+batch mode times are not comparable and are shown as given). Source: decision 63.
+
+### LLR-PLAN-11
+The plan viewer shall show the tree collapsible (`<CR>` / `o` one node, `zR` / `zM` all), with
+cost, estimated and actual rows (and how far apart, as a factor), loops and time per node; the
+hottest node highlighted; the raw plan one key away; the final state of a failed or cancelled plan
+named. Source: phase 5 plan; decision 64.
+
+### LLR-PLAN-12
+`:Dbbliss plan` shall show the estimated plan of the statement under the cursor (or the range), and
+`:Dbbliss plan actual` the actual plan; before an actual plan of a statement that is not plainly a
+read the user is asked, naming the statement and saying it will be run and rolled back, and nothing is
+sent when the answer is No. Source: phase 5 plan; decision 62.
+
+## Completion (Phase 5)
+
+### HLR-COMP-1
+`catalog/names` shall list the tables, views, functions and procedures of a database (schema, name,
+kind), system schemas left out unless asked, at most 20 000 and saying when it stopped there; and
+`catalog/columns` the columns (name, type) of a table or view the server resolves. Both use the
+catalog session. Source: phase 5 plan; decision 65.
+
+### LLR-COMP-2
+Catalog SQL for completion shall not use DISTINCT or GROUP BY to remove duplicates (as LLR-CAT-9).
+Verified by analysis.
+
+### LLR-COMP-3
+The completion core shall tell from the text before the cursor what is wanted: object names after
+FROM, JOIN, UPDATE, INTO, TABLE, TRUNCATE and the like; the objects of a schema after `schema.`; the
+columns of a table after `table.` or `alias.`, the alias read from the statement the cursor is in; in
+other places the columns of the tables that statement names. An identifier that needs quotes is
+inserted quoted for the engine. Source: phase 5 plan; decision 65.
+
+### LLR-COMP-4
+Completion shall never wait for the server: it answers from the per-connection cache, starts a load
+when the cache has no answer yet, and offers the items when the load ends. The cache is dropped on
+disconnect and when the schema tree is refreshed. Source: priorities (nonblocking UI); decision 65.
+
+### LLR-COMP-5
+The blink.cmp and nvim-cmp adapters shall be thin: they call the core, need neither plugin to be
+installed, and a request outside an SQL buffer with a connection answers nothing. Source: phase 5
+plan; decision 66.
+
 ## Client interface
 
 ### HLR-UI-1

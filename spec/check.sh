@@ -51,7 +51,7 @@ tlc NoConnCheck 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 tlc PausedNoWake 'Temporal propert(y|ies).*(violated|is violated|were violated)'
 tlc PausedReachable 'Invariant PausedUnreachable is violated'
 
-# Verifies: HLR-MGT-7, HLR-MGT-9, HLR-MGT-11 (Ops_Proposed); each other variant must fail
+# Verifies: HLR-MGT-7, HLR-MGT-9, HLR-MGT-11, HLR-PLAN-3, HLR-PLAN-4, HLR-PLAN-6 (Ops_Proposed); each other variant must fail
 echo "TLA+: spec/tla/Operations.tla"
 tlc Ops_Proposed pass Operations
 tlc Ops_NoDisconnectGuard 'Invariant NoOpOnClosedConn is violated' Operations
@@ -59,6 +59,8 @@ tlc Ops_NoDropGuard 'Invariant NoDropDuringOp is violated' Operations
 tlc Ops_NoShutdownCancel 'Invariant NoOrphanTool is violated' Operations
 tlc Ops_NoBackupRule 'Invariant ProdDropBacked is violated' Operations
 tlc Ops_StaleBackupCounts 'Invariant ProdDropBacked is violated' Operations
+tlc Ops_PlanAutocommit 'Invariant PlanNeverCommits is violated' Operations
+tlc Ops_PlanNoConfirm 'Invariant NoUnconfirmedWritePlan is violated' Operations
 
 # Verifies: HLR-TX-1, HLR-TX-2, HLR-TX-5 (NoSilentRollback, HonestTxView), HLR-CONC-3 (NoOrphanSession), LLR-CONC-2 (LeaseBeforeWrite must fail)
 echo "Quint: spec/quint/client.qnt"

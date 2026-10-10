@@ -52,6 +52,13 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
             // Verifies: HLR-MGT-8, HLR-MGT-9, HLR-MGT-10, LLR-MGT-12
             yield return ("drop_objects_and_databases", DropObjectsAndDatabases);
         }
+        if (profile.Engine is "postgres" or "sqlserver")
+        {
+            // Verifies: HLR-PLAN-1, HLR-PLAN-2, HLR-PLAN-3, HLR-PLAN-4, HLR-PLAN-7, HLR-PLAN-8
+            yield return ("plans_estimated_and_actual", PlansEstimatedAndActual);
+            // Verifies: HLR-PLAN-3, HLR-PLAN-5, HLR-PLAN-6
+            yield return ("plan_cancel_and_shutdown", PlanCancelAndShutdown);
+        }
         // Verifies: HLR-SCRIPT-3
         yield return ("error_line_in_buffer", ErrorLineInBuffer);
         // Verifies: HLR-CANCEL-6, HLR-CANCEL-2

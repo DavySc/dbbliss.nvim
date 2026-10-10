@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Engines;
 using Dbbliss.Backend.Management;
+using Dbbliss.Backend.Plans;
 using Dbbliss.Backend.Sessions;
 
 namespace Dbbliss.ProtocolTests;
@@ -69,7 +70,7 @@ public sealed class ForeignSession(string id, string identity)
     public bool Terminated;
 }
 
-public sealed class FakeEngine(FakeServer server, string name = "fake", bool hasCatalog = true, bool hasSessions = true, bool hasManagement = true) : IEngine
+public sealed class FakeEngine(FakeServer server, string name = "fake", bool hasCatalog = true, bool hasSessions = true, bool hasManagement = true, bool hasPlanner = true) : IEngine
 {
     public string Name => name;
 
@@ -84,6 +85,10 @@ public sealed class FakeEngine(FakeServer server, string name = "fake", bool has
     public FakeManagement FakeManagement { get; } = new();
 
     public IManagement? Management => hasManagement ? FakeManagement : null;
+
+    public FakePlanner FakePlanner { get; } = new();
+
+    public IPlanner? Planner => hasPlanner ? FakePlanner : null;
 
     public Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct) =>
         spec.ConnectionString == "refuse"

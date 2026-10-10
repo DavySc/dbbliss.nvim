@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Management;
+using Dbbliss.Backend.Plans;
 using Dbbliss.Backend.Scripts;
 using Dbbliss.Backend.Sessions;
 
@@ -22,6 +23,9 @@ public interface IEngine
 
     /// <summary>Backup and drop; null if the engine has none.</summary>
     IManagement? Management { get; }
+
+    /// <summary>Estimated and actual plans; null if the engine has none.</summary>
+    IPlanner? Planner { get; }
 
     Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct);
 

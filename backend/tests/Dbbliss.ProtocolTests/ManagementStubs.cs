@@ -10,6 +10,7 @@ public sealed class StubEngine(Func<IMessageSink, IEngineSession> open) : IEngin
     public string Name => "stub";
     public ISessionAdmin? Sessions => null;
     public IManagement? Management => null;
+    public Dbbliss.Backend.Plans.IPlanner? Planner => null;
     public int Opened;
     public IMessageSink? Sink { get; private set; }
 
@@ -26,8 +27,15 @@ public sealed class StubEngine(Func<IMessageSink, IEngineSession> open) : IEngin
 /// <summary>A server session that answers by what the SQL says and records everything sent to it.</summary>
 public sealed class ScriptedSession(
     Func<string, IReadOnlyDictionary<string, object?>?, IReadOnlyList<QueryTable>>? answer = null,
-    Func<string, QueryControl, Task>? execute = null) : IEngineSession
+    Func<string, QueryControl, Task>? execute = null,
+    Func<string, QueryControl, IResultSink, Task>? executeWithSink = null) : IEngineSession
 {
+    /// <summary>Everything sent, in order: statements as "sql: ...", transaction calls as "begin" and "rollback".</summary>
+    public List<string> Events { get; } = [];
+
+    /// <summary>A rollback that fails, like a connection that broke.</summary>
+    public bool RollbackThrows { get; set; }
+
     public List<string> Sent { get; } = [];
     public List<IReadOnlyDictionary<string, object?>?> Parameters { get; } = [];
     public bool Disposed;
@@ -45,11 +53,13 @@ public sealed class ScriptedSession(
     public async Task<ExecuteSummary> ExecuteAsync(string sql, IResultSink sink, QueryControl control)
     {
         Sent.Add(sql);
+        Events.Add("sql: " + sql);
         Parameters.Add(null);
         control.SetProtocolCancel(() => Interlocked.Increment(ref ProtocolCancels));
         try
         {
             if (execute is not null) await execute(sql, control);
+            if (executeWithSink is not null) await executeWithSink(sql, control, sink);
             return new ExecuteSummary(-1);
         }
         finally
@@ -58,9 +68,23 @@ public sealed class ScriptedSession(
         }
     }
 
-    public Task BeginTransactionAsync(CancellationToken ct) => throw new NotSupportedException();
-    public Task CommitAsync(CancellationToken ct) => throw new NotSupportedException();
-    public Task RollbackAsync(CancellationToken ct) => throw new NotSupportedException();
+    public Task BeginTransactionAsync(CancellationToken ct)
+    {
+        Events.Add("begin");
+        return Task.CompletedTask;
+    }
+
+    public Task CommitAsync(CancellationToken ct)
+    {
+        Events.Add("commit");
+        return Task.CompletedTask;
+    }
+
+    public Task RollbackAsync(CancellationToken ct)
+    {
+        Events.Add("rollback");
+        return RollbackThrows ? throw new InvalidOperationException("the connection is gone") : Task.CompletedTask;
+    }
     public Task<TransactionState> GetTransactionStateAsync(CancellationToken ct) => throw new NotSupportedException();
 
     public ValueTask DisposeAsync()

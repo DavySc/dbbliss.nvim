@@ -230,6 +230,44 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("operation_manager_guards_its_races", "", ManagementTests.TheManagerGuardsItsOwnRaces),
     // Verifies: HLR-MGT-7
     ("operation_ends_when_stdout_is_gone", "", ManagementTests.AnOperationEndsEvenWhenTheReportCannotBeWritten),
+    // Verifies: HLR-PLAN-7, LLR-PLAN-9
+    ("plan_pg_actual_fixture", "", () => { PlanParserTests.PostgresActualPlan(); return Task.CompletedTask; }),
+    // Verifies: HLR-PLAN-7
+    ("plan_pg_estimated_fixture", "", () => { PlanParserTests.PostgresEstimatedPlan(); return Task.CompletedTask; }),
+    // Verifies: LLR-PLAN-9
+    ("plan_pg_loops_spills_and_bad_output", "", PlanParserTests.PostgresLoopsSpillsAndBadOutput),
+    // Verifies: HLR-PLAN-7, LLR-PLAN-10
+    ("plan_mssql_estimated_fixture", "", () => { PlanParserTests.SqlServerEstimatedPlan(); return Task.CompletedTask; }),
+    // Verifies: HLR-PLAN-7, LLR-PLAN-10
+    ("plan_mssql_actual_fixture", "", () => { PlanParserTests.SqlServerActualPlan(); return Task.CompletedTask; }),
+    // Verifies: LLR-PLAN-10, HLR-PLAN-8
+    ("plan_mssql_threads_warnings_and_bad_output", "", PlanParserTests.SqlServerThreadsWarningsAndBadOutput),
+    // Verifies: HLR-PLAN-7
+    ("plan_own_figures_and_hottest_node", "", () => { PlanParserTests.OwnFiguresAndTheHottestNode(); return Task.CompletedTask; }),
+    // Verifies: HLR-PLAN-1, HLR-PLAN-7
+    ("plan_comes_back_as_one_notification", "", PlanTests.APlanComesBackAsOneNotification),
+    // Verifies: HLR-PLAN-4
+    ("plan_actual_of_a_write_needs_the_callers_word", "", PlanTests.AnActualPlanOfAWriteNeedsTheCallersWord),
+    // Verifies: HLR-PLAN-5, HLR-PLAN-8
+    ("plan_failures_and_cancels_are_reported", "", PlanTests.FailuresAndCancelsAreReported),
+    // Verifies: HLR-PLAN-6
+    ("plan_is_an_operation_of_its_connection", "", PlanTests.APlanIsAnOperationOfItsConnection),
+    // Verifies: HLR-PLAN-1
+    ("plan_bad_requests", "", PlanTests.BadRequests),
+    // Verifies: HLR-PLAN-2, HLR-PLAN-1
+    ("planner_pg_estimated_runs_nothing", "", PlannerTests.PostgresEstimatedRunsNothing),
+    // Verifies: HLR-PLAN-2, HLR-PLAN-3
+    ("planner_pg_actual_is_rolled_back", "", PlannerTests.PostgresActualRunsInATransactionThatIsRolledBack),
+    // Verifies: HLR-PLAN-5, HLR-PLAN-3
+    ("planner_pg_cancel_rolls_back", "", PlannerTests.PostgresCancelStopsTheStatementAndRollsBack),
+    // Verifies: HLR-PLAN-8
+    ("planner_pg_without_a_plan_fails", "", PlannerTests.PostgresWithoutAPlanIsAFailure),
+    // Verifies: HLR-PLAN-2, HLR-PLAN-1
+    ("planner_mssql_estimated_does_not_run", "", PlannerTests.SqlServerEstimatedAsksForTheShowplanInsteadOfRunning),
+    // Verifies: HLR-PLAN-2, HLR-PLAN-3, HLR-PLAN-8
+    ("planner_mssql_actual_is_rolled_back", "", PlannerTests.SqlServerActualRunsInATransactionAndKeepsOnlyThePlans),
+    // Verifies: HLR-PLAN-5, HLR-PLAN-3
+    ("planner_mssql_cancel_rolls_back", "", PlannerTests.SqlServerCancelStopsTheStatementAndRollsBack),
     // Verifies: HLR-SCRIPT-1
     ("script_split_rpc", "", ScriptSplitRpc),
     // Verifies: HLR-SCRIPT-3

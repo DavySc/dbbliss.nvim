@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Management;
+using Dbbliss.Backend.Plans;
 using Dbbliss.Backend.Scripts;
 using Dbbliss.Backend.Sessions;
 using Microsoft.Data.SqlClient;
@@ -19,6 +20,8 @@ public sealed partial class SqlServerEngine : IEngine
     public ICatalog? Catalog { get; } = new SqlServerCatalog();
 
     public ISessionAdmin? Sessions { get; } = new SqlServerSessions();
+
+    public IPlanner? Planner { get; } = new SqlServerPlanner();
 
     public IManagement? Management { get; } = new SqlServerManagement();
 

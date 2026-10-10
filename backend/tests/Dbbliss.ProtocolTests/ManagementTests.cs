@@ -316,7 +316,7 @@ public static class ManagementTests
         var (_, start) = await manager.StartBackupAsync(target, new BackupRequest("app", "hang", false));
         start();
         if (manager.TryBeginClose("c1")) throw new TestFailure("a connection with a running operation was closed");
-        manager.Cancel("b1");
+        manager.Cancel("b1", "backup");
         for (var i = 0; i < 100 && !manager.TryBeginClose("c1"); i++) await Task.Delay(50);
         try
         {
