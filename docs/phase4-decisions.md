@@ -81,7 +81,7 @@ nothing was sent) and was redone with a copy; a hang counts as a failure.
 **Found by the real servers, not by reading:** `xp_fileexist`'s parent column; a cancelled SQL Server
 BACKUP leaves its file; `pg_dump` 16 cannot dump a 17 server (CI installs the 17 client).
 
-**Not checked:** a restore by the product itself; Docker on Windows; `pg_dump` older than 12; a database
+**Not checked:** a restore by the product itself; non-ASCII messages of `pg_dump` on Windows (its output is read as UTF-8; a tool writing the console's code page can show wrong characters in a progress line, the exit code and the file are unaffected); Docker on Windows; `pg_dump` older than 12; a database
 with thousands of objects (notification volume); SQL Server below 2016 (`DATEDIFF_BIG` is Phase 3's; here
 `InstanceDefaultBackupPath` needs 2019); network paths and UNC backup targets; interactive use on a real
 Windows desktop; the Windows job-object / parent-death case in decision 55.

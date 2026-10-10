@@ -15,6 +15,9 @@ public static class ChildProcess
 
     public static int Run(string[] args)
     {
+        // The runner reads UTF-8; a Windows console would write its own code page.
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+        Console.InputEncoding = new System.Text.UTF8Encoding(false);
         switch (args[1])
         {
             case "lines":
