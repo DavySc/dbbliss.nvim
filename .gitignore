@@ -9,3 +9,4 @@ cancel-report.md
 coverage/
 obj/
 states/
+spec/tla/*_TTrace_*
