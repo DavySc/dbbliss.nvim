@@ -4,12 +4,17 @@ A Neovim database client (Lua frontend, .NET 10 backend over line-delimited JSON
 for **SQL Server and PostgreSQL**. Priorities, in order: reliability (no silent failures,
 protocol-level cancel, no lost results, no surprise commits), performance, Windows first.
 
-## Status (2026-10-09)
+## Status (2026-10-10)
 
-**Phase 2 (object info, schema tree, CREATE scripts) is implemented and green in CI on Linux and
-Windows, on branch `ccr-48313f28-j61iv5`; not merged into `main`: stop for the user's review.**
-Decisions to review: `docs/phase2-decisions.md` (35–42). Code: `Catalog/` (backend), `info.lua`,
-`tree.lua`, `names.lua` (Lua); scenarios in `CatalogScenarios.cs`, `tests/nvim/catalog_test.lua`.
+**Phase 3 (sessions: list, cancel statement, terminate, rollback status) is implemented on branch
+`ccr-48313f28-j61iv5`; not merged into `main`: stop for the user's review.** Built spec-first
+(`HLR-ADM-1..8`, `LLR-ADM-9..12`). Decisions to review: `docs/phase3-decisions.md` (43–50). Code:
+`Sessions/` (backend), `sessions.lua` (Lua); tests in `SessionTests.cs`, `SessionEngineTests.cs`,
+`SessionScenarios.cs`, `tests/nvim/sessions_test.lua`.
+
+**Phase 2 (object info, schema tree, CREATE scripts) is complete and on `main`.** Decisions:
+`docs/phase2-decisions.md` (35–42). Code: `Catalog/` (backend), `info.lua`, `tree.lua`, `names.lua`
+(Lua); scenarios in `CatalogScenarios.cs`, `tests/nvim/catalog_test.lua`.
 
 **Phase 0 (cancel spike) and Phase 1 (core query loop, M1–M5) are complete and on `main`.** Stop for the user's
 review at the end of each phase. Decisions to review: `docs/phase1-decisions.md` (22–34), including

@@ -30,6 +30,17 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
             // Verifies: HLR-CAT-4
             yield return ("catalog_independent_of_user_session", CatalogIndependentOfUserSession);
         }
+        if (profile.Engine is "postgres" or "sqlserver")
+        {
+            // Verifies: HLR-ADM-1, HLR-ADM-2, HLR-ADM-3, HLR-ADM-5, HLR-ADM-6
+            yield return ("sessions_list_cancel", SessionsListAndCancel);
+            // Verifies: HLR-ADM-4, HLR-ADM-7
+            yield return ("sessions_terminate_rolls_back", SessionsTerminateRollsBack);
+            // Verifies: HLR-ADM-8
+            yield return ("sessions_limited_user", SessionsLimitedUser);
+            // Verifies: HLR-ADM-7
+            if (profile.Engine == "sqlserver") yield return ("sessions_rollback_progress", SessionsRollbackProgress);
+        }
         // Verifies: HLR-SCRIPT-3
         yield return ("error_line_in_buffer", ErrorLineInBuffer);
         // Verifies: HLR-CANCEL-6, HLR-CANCEL-2
@@ -95,7 +106,7 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
     private ScenarioResult Result(string scenario, Outcome o, string detail, long? stopMs = null) =>
         new(profile.Engine, scenario, o, detail, stopMs);
 
-    private async Task<(BackendClient Client, string ConnectionId, string Session)> StartAsync(JsonObject? options = null, string? stateDir = null, string? connectionString = null)
+    private async Task<(BackendClient Client, string ConnectionId, string Session)> StartAsync(JsonObject? options = null, string? stateDir = null, string? connectionString = null, bool passwordFromEnv = true)
     {
         var env = BackendEnv;
         if (stateDir is not null) env["DBBLISS_STATE_DIR"] = stateDir;
@@ -106,7 +117,7 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
             ["engine"] = profile.Engine,
             ["connection_string"] = connectionString ?? profile.ConnectionString,
             // No password env set: integrated auth (e.g. SQL Server Express on the Windows CI runner).
-            ["password"] = string.IsNullOrEmpty(Environment.GetEnvironmentVariable(profile.PasswordEnv)) ? null : new JsonObject { ["env"] = profile.PasswordEnv },
+            ["password"] = !passwordFromEnv || string.IsNullOrEmpty(Environment.GetEnvironmentVariable(profile.PasswordEnv)) ? null : new JsonObject { ["env"] = profile.PasswordEnv },
             ["options"] = options,
         });
         return (client, conn["connection_id"]!.GetValue<string>(), conn["server_session_id"]!.GetValue<string>());

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Dbbliss.Backend.Catalog;
+using Dbbliss.Backend.Sessions;
 using Dbbliss.Backend.Engines;
 using Dbbliss.Backend.Rpc;
 using Dbbliss.Backend.Scripts;
@@ -167,6 +168,10 @@ public sealed class Backend
             "catalog/describe" => new Reply(await CatalogAsync(p, async (cat, session, ct) => (await cat.DescribeAsync(session, ObjectOf(p), ct)).ToJson())),
             "catalog/script" => new Reply(await CatalogAsync(p, async (cat, session, ct) =>
                 new JsonObject { ["text"] = await cat.ScriptAsync(session, ObjectOf(p), ct) })),
+            "sessions/list" => new Reply(await SessionsAsync(p, null, ListSessionsAsync)),
+            "sessions/cancel" => new Reply(await SessionsAsync(p, TargetOf(p), CancelSessionAsync)),
+            "sessions/terminate" => new Reply(await SessionsAsync(p, TargetOf(p), TerminateSessionAsync)),
+            "sessions/status" => new Reply(await SessionsAsync(p, TargetOf(p), SessionStatusAsync)),
             "transaction/begin" => await TransactionAsync(p, (s, ct) => s.BeginTransactionAsync(ct)),
             "transaction/commit" => await TransactionAsync(p, (s, ct) => s.CommitAsync(ct)),
             "transaction/rollback" => await TransactionAsync(p, (s, ct) => s.RollbackAsync(ct)),
@@ -540,7 +545,7 @@ public sealed class Backend
             IEngineSession session;
             try
             {
-                session = await connection.Engine.OpenAsync(connection.Spec, new DiscardMessages(), timeout.Token);
+                session = await connection.Engine.OpenAsync(connection.Spec, connection.CatalogMessages, timeout.Token);
                 await catalog.PrepareAsync(session, timeout.Token);
             }
             catch (Exception ex) when (ex is not (RpcException or OperationCanceledException))
@@ -560,6 +565,10 @@ public sealed class Backend
         catch (CatalogException ex)
         {
             throw new RpcException(RpcErrors.Catalog, ex.Message);
+        }
+        catch (SessionActionException ex)
+        {
+            throw new RpcException(RpcErrors.Session, ex.Message);
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
@@ -590,11 +599,62 @@ public sealed class Backend
 
     private static string? OptStr(JsonObject p, string name) => p[name]?.GetValue<string>() is { Length: > 0 } s ? s : null;
 
-    private sealed class DiscardMessages : IMessageSink
+    // Sessions: other sessions on the server, through the connection's catalog session ------------
+
+    private delegate Task<JsonObject> SessionWork(Connection connection, ISessionAdmin admin, IEngineSession session, SessionTarget? target, CancellationToken ct);
+
+    private async Task<JsonObject> SessionsAsync(JsonObject p, SessionTarget? target, SessionWork work)
     {
-        public void Message(string severity, string text, int? number = null, int? line = null)
+        var connection = GetConnection(p);
+        var admin = connection.Engine.Sessions
+            ?? throw new RpcException(RpcErrors.InvalidParams, $"{connection.Engine.Name} has no session support yet.");
+        return await CatalogAsync(p, (_, session, ct) => work(connection, admin, session, target, ct));
+    }
+
+    private static SessionTarget TargetOf(JsonObject p) =>
+        new(OptStr(p, "id") ?? throw new RpcException(RpcErrors.InvalidParams, "Missing parameter id."),
+            OptStr(p, "identity") ?? throw new RpcException(RpcErrors.InvalidParams, "Missing parameter identity."));
+
+    private static async Task<JsonObject> ListSessionsAsync(Connection connection, ISessionAdmin admin, IEngineSession session, SessionTarget? _, CancellationToken ct)
+    {
+        var rows = await admin.ListAsync(session, ct);
+        var mine = new[] { connection.Session.ServerSessionId, session.ServerSessionId };
+        return new JsonObject
         {
+            ["sessions"] = new JsonArray(rows.Select(r => (JsonNode)r.ToJson(mine.Contains(r.Id))).ToArray()),
+            ["can_cancel"] = admin.CanCancel,
+        };
+    }
+
+    /// <summary>The connection's own sessions are not for these calls: the user's query is cancelled with <c>cancel</c>.</summary>
+    private static void RefuseOwn(Connection connection, IEngineSession catalogSession, SessionTarget target)
+    {
+        if (target.Id == connection.Session.ServerSessionId || target.Id == catalogSession.ServerSessionId)
+        {
+            throw new SessionActionException($"Session {target.Id} is this connection's own; use cancel for its query, disconnect to end it.");
         }
+    }
+
+    private static async Task<JsonObject> CancelSessionAsync(Connection connection, ISessionAdmin admin, IEngineSession session, SessionTarget? target, CancellationToken ct)
+    {
+        RefuseOwn(connection, session, target!);
+        if (!admin.CanCancel)
+        {
+            throw new SessionActionException($"{connection.Engine.Name} cannot cancel another session's statement without ending the session; terminate it instead.");
+        }
+        return new JsonObject { ["done"] = await admin.CancelAsync(session, target!, ct) };
+    }
+
+    private static async Task<JsonObject> TerminateSessionAsync(Connection connection, ISessionAdmin admin, IEngineSession session, SessionTarget? target, CancellationToken ct)
+    {
+        RefuseOwn(connection, session, target!);
+        return new JsonObject { ["done"] = await admin.TerminateAsync(session, target!, ct) };
+    }
+
+    private static async Task<JsonObject> SessionStatusAsync(Connection connection, ISessionAdmin admin, IEngineSession session, SessionTarget? target, CancellationToken ct)
+    {
+        var status = await admin.StatusAsync(session, target!, connection.CatalogMessages, ct);
+        return new JsonObject { ["present"] = status.Present, ["detail"] = status.Detail };
     }
 
     private static async Task<JsonObject> TransactionAsync(Connection connection, Func<IEngineSession, CancellationToken, Task> action)
@@ -771,6 +831,9 @@ public sealed class Backend
         /// <summary>The catalog session (see CatalogAsync); guarded by <see cref="CatalogLock"/>.</summary>
         public IEngineSession? CatalogSession { get; set; }
         public SemaphoreSlim CatalogLock { get; } = new(1, 1);
+
+        /// <summary>What the catalog session says. Never sent to the client; session status reads it.</summary>
+        public MessageLog CatalogMessages { get; } = new();
 
         public async Task CloseCatalogAsync()
         {

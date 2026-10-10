@@ -83,7 +83,7 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("cancel_is_resent_and_unacknowledged_cancel_warns", "", CancelIsResentAndWarns),
     // Verifies: HLR-CONC-1
     ("second_operation_is_busy", "", SecondOperationIsBusy),
-    // Verifies: LLR-CAT-9
+    // Verifies: LLR-CAT-9, LLR-ADM-10
     ("catalog_sql_has_no_dedup_keywords", "", () => { CatalogSqlRules.NoDedupKeywords(); return Task.CompletedTask; }),
     // Verifies: LLR-CONC-2
     ("execute_right_after_query_done", "lease released too late", ExecuteRightAfterQueryDone),
@@ -123,6 +123,40 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("catalog_errors", "", CatalogTests.Errors),
     // Verifies: HLR-CAT-1, HLR-CAT-3
     ("catalog_shapes", "", CatalogTests.DescribeAndScriptShapes),
+    // Verifies: HLR-ADM-1
+    ("sessions_list_shape", "", SessionTests.ListShape),
+    // Verifies: HLR-ADM-6
+    ("sessions_own_marked_and_refused", "", SessionTests.OwnSessionsAreMarkedAndRefused),
+    // Verifies: HLR-ADM-2
+    ("sessions_work_while_user_session_busy", "", SessionTests.WorksWhileTheUserSessionIsBusy),
+    // Verifies: HLR-ADM-3
+    ("sessions_cancel_keeps_the_session", "", SessionTests.CancelStopsTheStatementNotTheSession),
+    // Verifies: HLR-ADM-3
+    ("sessions_cancel_refused_without_engine_support", "", SessionTests.CancelRefusedWhereTheEngineCannot),
+    // Verifies: HLR-ADM-4
+    ("sessions_terminate_ends_the_session", "", SessionTests.TerminateEndsTheSession),
+    // Verifies: HLR-ADM-5
+    ("sessions_actions_reach_only_the_session_seen", "", SessionTests.ActionsOnlyReachTheSessionThatWasSeen),
+    // Verifies: HLR-ADM-8
+    ("sessions_unsignalled_and_failed_actions_reported", "", SessionTests.UnsignalledAndFailedActionsAreReported),
+    // Verifies: HLR-ADM-7
+    ("sessions_status_presence_and_progress", "", SessionTests.StatusReportsPresenceAndProgress),
+    // Verifies: HLR-ADM-1, LLR-ADM-9
+    ("sessions_bad_requests", "", SessionTests.BadRequests),
+    // Verifies: LLR-ADM-9
+    ("sessions_ids_are_plain_integers", "", () => { SessionTests.IdsArePlainIntegers(); return Task.CompletedTask; }),
+    // Verifies: HLR-ADM-5
+    ("sessions_identity_tokens_round_trip", "", () => { SessionTests.IdentityTokensRoundTrip(); return Task.CompletedTask; }),
+    // Verifies: HLR-ADM-4, HLR-ADM-5, LLR-ADM-9
+    ("sessions_sqlserver_kill_built_from_checked_integer", "", SessionEngineTests.SqlServerKillIsBuiltFromTheCheckedInteger),
+    // Verifies: HLR-ADM-7
+    ("sessions_sqlserver_status_reads_this_calls_messages", "", SessionEngineTests.SqlServerStatusReadsOnlyThisCallsMessages),
+    // Verifies: HLR-ADM-3, HLR-ADM-5, HLR-ADM-8
+    ("sessions_postgres_signals_matched_and_reported", "", SessionEngineTests.PostgresSignalsAreMatchedAndReported),
+    // Verifies: HLR-ADM-1
+    ("sessions_lists_read_into_rows", "", SessionEngineTests.ListsAreReadIntoRows),
+    // Verifies: HLR-ADM-3
+    ("sessions_sqlserver_cannot_cancel_another_session", "", SessionTests.SqlServerCannotCancelAnotherSession),
     // Verifies: HLR-SCRIPT-1
     ("script_split_rpc", "", ScriptSplitRpc),
     // Verifies: HLR-SCRIPT-3

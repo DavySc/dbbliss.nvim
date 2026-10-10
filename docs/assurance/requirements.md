@@ -269,6 +269,68 @@ System databases and schemas shall be hidden in the tree unless toggled. Source:
 Catalog SQL shall not use DISTINCT or GROUP BY to remove duplicates. Source: phase 2 plan;
 decision 38. Verified by analysis.
 
+## Session administration (Phase 3)
+
+### HLR-ADM-1
+`sessions/list` shall return the server's user sessions as engine-neutral rows with id, user,
+database, host, application, state, duration, wait, blocking session, open-transaction flag and
+query text, plus an identity token for each, and whether the engine can cancel another session's
+statement. PostgreSQL reads `pg_stat_activity` (client backends); SQL Server joins
+`sys.dm_exec_sessions` to `sys.dm_exec_requests`. Source: phase 3 plan; decisions 43, 44.
+
+### HLR-ADM-2
+Session calls shall work while the user's session is busy, has a paused result, or is in an aborted
+transaction, by using the connection's catalog session. Source: HLR-CAT-4; decision 43.
+
+### HLR-ADM-3
+`sessions/cancel` shall stop the running statement of another session without ending the session
+(PostgreSQL `pg_cancel_backend`). An engine with no such server-side action (SQL Server) shall
+refuse with a user-fixable error (code 1008) before sending anything. Source: phase 3 plan;
+decision 45.
+
+### HLR-ADM-4
+`sessions/terminate` shall end another session and roll back what it had open (PostgreSQL
+`pg_terminate_backend`, SQL Server `KILL`). Source: phase 3 plan.
+
+### HLR-ADM-5
+An action shall only reach the session the caller saw: the request carries the identity token from
+the list (PostgreSQL `backend_start`, SQL Server `login_time`), and when no session with that id and
+token exists the backend shall refuse with code 1008 and send no signal. Source: priorities (no
+surprise damage); decision 46.
+
+### HLR-ADM-6
+The backend shall refuse (code 1008) any action on the connection's own sessions, the user's and
+the catalog session; cancelling one's own query goes through `cancel`. Source: decision 47.
+
+### HLR-ADM-7
+`sessions/status` shall report whether the session is still present and, on SQL Server, the
+rollback progress of a killed session (`KILL ... WITH STATUSONLY`). Source: phase 3 plan;
+decision 48.
+
+### HLR-ADM-8
+An action the server did not carry out (a signal sent to nothing) shall be reported as not done,
+and a server error (permissions, for one) shall reach the user as a database error: never a silent
+success. Source: priorities (no silent failures).
+
+### LLR-ADM-9
+A session id shall be a plain integer where the engine's actions take one, and `KILL` shall be built
+only from that integer; anything else is refused with code 1008. Source: decision 46.
+
+### LLR-ADM-10
+Session SQL shall not use DISTINCT or GROUP BY to remove duplicates (as LLR-CAT-9). Verified by
+analysis.
+
+### LLR-ADM-11
+The sessions buffer shall show the rows as an aligned table in the order given, mark the
+connection's own sessions, and refresh on request. Cancel and terminate shall ask for confirmation
+naming the session, its user and its query, default to No, warn when the session has an open
+transaction (terminating rolls it back), and use stronger wording on a prod connection. Nothing
+is sent when the user declines. Source: phase 3 plan; decision 49.
+
+### LLR-ADM-12
+`:Dbbliss sessions` shall open the sessions buffer for the current connection and complete.
+Source: phase 3 plan.
+
 ## Client interface
 
 ### HLR-UI-1

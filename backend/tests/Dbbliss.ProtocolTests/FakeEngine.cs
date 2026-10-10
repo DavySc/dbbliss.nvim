@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using System.Collections.Concurrent;
 using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Engines;
+using Dbbliss.Backend.Sessions;
 
 namespace Dbbliss.ProtocolTests;
 
@@ -36,6 +37,10 @@ public sealed class FakeServer
     public string? MessageOnOpen { get; set; }
     public int DisposeAttempts;
 
+    /// <summary>Sessions of other users on the server, for the session admin.</summary>
+    public ConcurrentDictionary<string, ForeignSession> Foreign { get; } = new();
+    public bool CanCancelOthers { get; set; } = true;
+
     internal FakeSession OpenSession(IMessageSink messages)
     {
         if (OpensBeforeRefusing is { } n && Interlocked.Increment(ref OpenCount) > n) throw new FakeServerException("too many sessions");
@@ -52,13 +57,28 @@ public sealed class FakeServer
     }
 }
 
-public sealed class FakeEngine(FakeServer server, string name = "fake", bool hasCatalog = true) : IEngine
+/// <summary>Another user's session. <see cref="Signals"/> false: the server accepts the call but there is nothing to signal.</summary>
+public sealed class ForeignSession(string id, string identity)
+{
+    public string Id { get; } = id;
+    public string Identity { get; } = identity;
+    public bool InTransaction { get; set; }
+    public bool Signals { get; set; } = true;
+    public int Cancelled;
+    public bool Terminated;
+}
+
+public sealed class FakeEngine(FakeServer server, string name = "fake", bool hasCatalog = true, bool hasSessions = true) : IEngine
 {
     public string Name => name;
 
     public FakeCatalog FakeCatalog { get; } = new();
 
     public ICatalog? Catalog => hasCatalog ? FakeCatalog : null;
+
+    public FakeSessionAdmin FakeSessions { get; } = new(server);
+
+    public ISessionAdmin? Sessions => hasSessions ? FakeSessions : null;
 
     public Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct) =>
         spec.ConnectionString == "refuse"
@@ -81,6 +101,8 @@ public sealed class FakeEngine(FakeServer server, string name = "fake", bool has
 /// </summary>
 public sealed class FakeSession(FakeServer server, string id, IMessageSink messages) : IEngineSession
 {
+    public IMessageSink Messages => messages;
+
     private readonly Lock _gate = new();
 
     public string ServerSessionId { get; } = id;

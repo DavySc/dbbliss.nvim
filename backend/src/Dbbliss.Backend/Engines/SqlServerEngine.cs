@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Scripts;
+using Dbbliss.Backend.Sessions;
 using Microsoft.Data.SqlClient;
 
 namespace Dbbliss.Backend.Engines;
@@ -15,6 +16,8 @@ public sealed partial class SqlServerEngine : IEngine
     public ScriptDialect Dialect => ScriptDialect.GoBatches;
 
     public ICatalog? Catalog { get; } = new SqlServerCatalog();
+
+    public ISessionAdmin? Sessions { get; } = new SqlServerSessions();
 
     /// <summary>
     /// SET options applied to every new session, as SSMS does. Microsoft.Data.SqlClient already logs in

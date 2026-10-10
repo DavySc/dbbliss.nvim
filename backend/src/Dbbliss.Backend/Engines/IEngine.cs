@@ -1,6 +1,7 @@
 using System.Text.Json.Nodes;
 using Dbbliss.Backend.Catalog;
 using Dbbliss.Backend.Scripts;
+using Dbbliss.Backend.Sessions;
 
 namespace Dbbliss.Backend.Engines;
 
@@ -14,6 +15,9 @@ public interface IEngine
 
     /// <summary>Catalog queries (schema tree, object info, scripting); null if the engine has none.</summary>
     ICatalog? Catalog => null;
+
+    /// <summary>Listing, cancelling and ending other sessions; null if the engine has none.</summary>
+    ISessionAdmin? Sessions { get; }
 
     Task<IEngineSession> OpenAsync(ConnectionSpec spec, IMessageSink messages, CancellationToken ct);
 

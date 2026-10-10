@@ -19,7 +19,11 @@
     "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs",
     "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs",
     "backend/src/Dbbliss.Backend/Engines/AdoStreaming.cs",
-    "backend/src/Dbbliss.Backend/Engines/AdoQuery.cs"
+    "backend/src/Dbbliss.Backend/Engines/AdoQuery.cs",
+    "backend/src/Dbbliss.Backend/Sessions/ISessionAdmin.cs",
+    "backend/src/Dbbliss.Backend/Sessions/SessionIds.cs",
+    "backend/src/Dbbliss.Backend/Sessions/PostgresSessions.cs",
+    "backend/src/Dbbliss.Backend/Sessions/SqlServerSessions.cs"
   ],
   "ignore_artifacts": [
     {

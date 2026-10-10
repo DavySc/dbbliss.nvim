@@ -6,6 +6,7 @@ local results = require('dbbliss.results')
 local info = require('dbbliss.info')
 local names = require('dbbliss.names')
 local tree = require('dbbliss.tree')
+local sessions = require('dbbliss.sessions')
 
 local M = {}
 
@@ -137,6 +138,12 @@ function M.setup(opts)
       M._script(conn_name, M._object_params(node))
     end,
     show_system = state.config.tree.show_system,
+  })
+  sessions.setup({
+    request = function(conn_id, method, params, cb)
+      M._catalog_request(conn_id, method, params, cb)
+    end,
+    notify = notify,
   })
   M._apply_mappings()
   results.setup({
@@ -878,6 +885,15 @@ function M.tree()
   end
 end
 
+--- The server's sessions for the current connection: who is running what, with keys to cancel a
+--- statement or terminate a session.
+function M.sessions()
+  local cname, conn = current_connection()
+  if conn then
+    sessions.open({ id = conn.id, name = cname, env = (state.config.connections[cname] or {}).env })
+  end
+end
+
 --- Buffer-local keys in SQL buffers (config.mappings).
 function M._apply_mappings()
   local lhs = state.config.mappings and state.config.mappings.info
@@ -1030,6 +1046,10 @@ local subcommands = {
   -- The schema browser.
   tree = function()
     M.tree()
+  end,
+  -- The server's sessions, with cancel and terminate.
+  sessions = function()
+    M.sessions()
   end,
   -- A CREATE script for a name (default: the one under the cursor).
   script = function(args)

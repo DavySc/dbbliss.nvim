@@ -1,10 +1,10 @@
 {
  "backend/src/Dbbliss.Backend/Backend.cs": {
-  "branches": 99.55,
-  "lines": 99.32
+  "branches": 99.57,
+  "lines": 99.37
  },
  "backend/src/Dbbliss.Backend/Catalog/CatalogHelpers.cs": {
-  "branches": 70.0,
+  "branches": 73.33,
   "lines": 100.0
  },
  "backend/src/Dbbliss.Backend/Catalog/CatalogModels.cs": {
@@ -32,8 +32,8 @@
   "lines": 100.0
  },
  "backend/src/Dbbliss.Backend/Engines/AdoStreaming.cs": {
-  "branches": 25.0,
-  "lines": 50.0
+  "branches": 100.0,
+  "lines": 100.0
  },
  "backend/src/Dbbliss.Backend/Engines/IEngine.cs": {
   "branches": 0.0,
@@ -41,15 +41,15 @@
  },
  "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs": {
   "branches": 83.33,
-  "lines": 87.25
+  "lines": 87.33
  },
  "backend/src/Dbbliss.Backend/Engines/QueryControl.cs": {
   "branches": 100.0,
   "lines": 100.0
  },
  "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs": {
-  "branches": 93.62,
-  "lines": 97.01
+  "branches": 95.56,
+  "lines": 97.04
  },
  "backend/src/Dbbliss.Backend/Engines/ValueConverter.cs": {
   "branches": 100.0,
@@ -91,6 +91,22 @@
   "branches": 100.0,
   "lines": 100.0
  },
+ "backend/src/Dbbliss.Backend/Sessions/ISessionAdmin.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Sessions/PostgresSessions.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Sessions/SessionIds.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
+ "backend/src/Dbbliss.Backend/Sessions/SqlServerSessions.cs": {
+  "branches": 100.0,
+  "lines": 100.0
+ },
  "lua/dbbliss/backend.lua": {
   "lines": 75.49
  },
@@ -98,7 +114,7 @@
   "lines": 97.44
  },
  "lua/dbbliss/init.lua": {
-  "lines": 82.47
+  "lines": 82.88
  },
  "lua/dbbliss/names.lua": {
   "lines": 97.06
@@ -111,6 +127,9 @@
  },
  "lua/dbbliss/script.lua": {
   "lines": 100.0
+ },
+ "lua/dbbliss/sessions.lua": {
+  "lines": 93.65
  },
  "lua/dbbliss/tree.lua": {
   "lines": 92.31

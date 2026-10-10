@@ -95,6 +95,7 @@ jobs:
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/results_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/catalog_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/sessions_test.lua
 
       - name: End-to-end through the plugin (both engines)
         shell: bash
@@ -129,6 +130,7 @@ jobs:
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/client_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/results_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/catalog_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/sessions_test.lua
 
   # The formal models in spec/ (TLA+ query lifecycle, Quint client/transactions): the proposed design
   # must hold and every other variant must fail the documented way. Linux only; the models do not

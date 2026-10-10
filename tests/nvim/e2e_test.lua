@@ -16,6 +16,7 @@ local engine = assert(env.DBBLISS_E2E_ENGINE, 'DBBLISS_E2E_ENGINE not set')
 local dbbliss = require('dbbliss')
 local results = require('dbbliss.results')
 local tree = require('dbbliss.tree')
+local sessions = require('dbbliss.sessions')
 vim.notify = function() end
 
 dbbliss.setup({
@@ -312,6 +313,40 @@ local steps = {
       dbbliss.run('buffer')
       wait('the select', idle)
       expect(text():find('(1 row)', 1, true), 'the recreated table cannot be read:\n' .. excerpt())
+    end,
+  },
+  {
+    -- Verifies: HLR-ADM-1, HLR-ADM-6, LLR-ADM-11
+    'sessions_buffer_lists_own_sessions',
+    function()
+      dbbliss.sessions()
+      local buf
+      wait('the sessions list', function()
+        buf = vim.fn.bufnr('dbbliss://sessions/db')
+        return buf > 0 and sessions._state.data[buf] ~= nil
+      end)
+      local own = {}
+      for line, row in pairs(sessions._state.line_rows[buf]) do
+        if row.own then
+          own[#own + 1] = line
+        end
+      end
+      expect(#own == 2, ('expected the user session and the catalog session marked, got %d'):format(#own))
+      local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+      expect(text:find('dbbliss', 1, true), 'the application name of our own sessions is shown:\n' .. text)
+      -- An own session is never offered for termination.
+      local asked = false
+      local confirm = vim.fn.confirm
+      vim.fn.confirm = function()
+        asked = true
+        return 2
+      end
+      vim.api.nvim_set_current_win(vim.fn.win_findbuf(buf)[1])
+      vim.api.nvim_win_set_cursor(0, { own[1], 0 })
+      vim.fn.maparg('x', 'n', false, true).callback()
+      vim.fn.confirm = confirm
+      expect(not asked, 'terminating the connection\'s own session was offered')
+      vim.cmd('bwipeout!')
     end,
   },
   {

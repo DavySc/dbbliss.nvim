@@ -133,6 +133,31 @@ require('dbbliss').setup({
 })
 ```
 
+### Sessions
+
+| Command | |
+|---|---|
+| `:Dbbliss sessions` | the server's sessions for the current connection: id, user, database, host, application, state, duration, wait, blocked by, open transaction, query |
+
+In the sessions buffer: `r` refreshes, `c` cancels the session's running statement (the session stays),
+`x` terminates the session, `s` asks the server whether it is still there (SQL Server: the rollback
+progress of a killed session, from `KILL ... WITH STATUSONLY`), `<CR>` opens the full query text, `q`
+closes. Both actions ask first, naming the session, its user and its query; the default is No, the
+question says when the session has an open transaction (terminating rolls it back), and on a `prod`
+connection it says PROD in the question and on the button.
+
+- PostgreSQL reads `pg_stat_activity` (client backends) and acts with `pg_cancel_backend` /
+  `pg_terminate_backend`. A role sees other users' sessions only with `pg_read_all_stats`, and may
+  signal them only with `pg_signal_backend` (or as the same role).
+- SQL Server joins `sys.dm_exec_sessions` to `sys.dm_exec_requests` (needs `VIEW SERVER STATE` to see
+  other logins) and acts with `KILL` (needs `ALTER ANY CONNECTION`). It has no way to stop another
+  session's statement without ending the session, so `c` is refused there and says so.
+- An action names the session by its id **and** the session's start time from the list. If the id has
+  been reused by another session, nothing is sent. The connection's own two sessions (marked `●`) are
+  never offered: cancel your own query with `:Dbbliss cancel`.
+- The list is read on the connection's catalog session, so it works while your own query is running,
+  paused, or in an aborted transaction.
+
 ### Results
 
 Results go to the `dbbliss://results` buffer as aligned tables (column widths from the first rows,

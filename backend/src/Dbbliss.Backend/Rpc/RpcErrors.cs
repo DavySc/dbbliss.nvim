@@ -19,6 +19,8 @@ public static class RpcErrors
     public const int ShuttingDown = 1006;
     /// <summary>A catalog request the user can fix: the name matched nothing, or too much.</summary>
     public const int Catalog = 1007;
+    /// <summary>A session action the user can fix: the session changed, is gone, is the connection's own, or the engine has no such action.</summary>
+    public const int Session = 1008;
 }
 
 public sealed class RpcException(int code, string message, JsonNode? data = null) : Exception(message)

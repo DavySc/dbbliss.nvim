@@ -64,6 +64,15 @@ public abstract class EngineProfile
 
     public abstract Task<ServerView> ViewAsync(DbConnection observer, string serverSessionId);
 
+    /// <summary>Phase 3: the server's id of the connection's own session.</summary>
+    public virtual string ServerIdSql => throw new NotSupportedException();
+
+    public async Task<string> ServerIdAsync(DbConnection c) =>
+        Convert.ToString((await FirstRowAsync(c, ServerIdSql)).Values[0], System.Globalization.CultureInfo.InvariantCulture)!;
+
+    /// <summary>A login that can see other sessions but may not signal them; null where the engine has no sessions admin.</summary>
+    public virtual Task<LimitedUser?> CreateLimitedUserAsync(DbConnection observer) => Task.FromResult<LimitedUser?>(null);
+
     public abstract string CreateProbeTableSql(string table);
     public abstract string DropProbeTableSql(string table);
     public virtual string InsertProbeSql(string table) => $"INSERT INTO {table} (id) VALUES (1)";
@@ -101,8 +110,23 @@ public abstract class EngineProfile
     }
 }
 
+/// <param name="ConnectionString">Carries its own password.</param>
+public sealed record LimitedUser(string ConnectionString, Func<Task> DropAsync);
+
 public sealed class PostgresProfile : EngineProfile
 {
+    public override string ServerIdSql => "SELECT pg_backend_pid()";
+
+    public override async Task<LimitedUser?> CreateLimitedUserAsync(DbConnection observer)
+    {
+        await ExecAsync(observer, "DROP ROLE IF EXISTS dbbliss_limited");
+        await ExecAsync(observer, "CREATE ROLE dbbliss_limited LOGIN PASSWORD 'limited-Pw1'");
+        // Sees every session (without it other users' rows are blank), but may not signal them.
+        await ExecAsync(observer, "GRANT pg_read_all_stats TO dbbliss_limited");
+        var b = new NpgsqlConnectionStringBuilder(ConnectionString) { Username = "dbbliss_limited", Password = "limited-Pw1" };
+        return new LimitedUser(b.ConnectionString, () => ExecAsync(observer, "DROP ROLE IF EXISTS dbbliss_limited"));
+    }
+
     public override string? UnreachableConnectionString => "Host=127.0.0.1;Port=1;Username=nobody;Database=none;Timeout=3";
     public override string? ApplicationNameSql => "SHOW application_name";
     public override string Engine => "postgres";
@@ -197,6 +221,17 @@ public sealed class PostgresProfile : EngineProfile
 
 public sealed class SqlServerProfile : EngineProfile
 {
+    public override string ServerIdSql => "SELECT @@SPID";
+
+    public override async Task<LimitedUser?> CreateLimitedUserAsync(DbConnection observer)
+    {
+        await ExecAsync(observer, "IF SUSER_ID('dbbliss_limited') IS NOT NULL DROP LOGIN dbbliss_limited");
+        await ExecAsync(observer, "CREATE LOGIN dbbliss_limited WITH PASSWORD = 'Limited-Pw1-x', CHECK_POLICY = OFF");
+        await ExecAsync(observer, "GRANT VIEW SERVER STATE TO dbbliss_limited");
+        var b = new SqlConnectionStringBuilder(ConnectionString) { IntegratedSecurity = false, UserID = "dbbliss_limited", Password = "Limited-Pw1-x" };
+        return new LimitedUser(b.ConnectionString, () => ExecAsync(observer, "IF SUSER_ID('dbbliss_limited') IS NOT NULL DROP LOGIN dbbliss_limited"));
+    }
+
     public override string? UnreachableConnectionString => "Server=127.0.0.1,1;User Id=nobody;TrustServerCertificate=true;Connect Timeout=3";
     public override string? ApplicationNameSql => "SELECT APP_NAME()";
     public override string Engine => "sqlserver";
