@@ -97,13 +97,24 @@ options = { mssql_set_options = { ARITHABORT = 'OFF', DEADLOCK_PRIORITY = 'LOW' 
 | `:Dbbliss cancel` | cancel the running query (protocol-level); the rest of a script is not run |
 | `:Dbbliss begin` / `commit` / `rollback` | explicit transactions |
 | `:Dbbliss status` | connections, transaction state, running queries |
-| `:Dbbliss disconnect` | asks before rolling back an open transaction |
+| `:Dbbliss use <name>` | binds this buffer to an open connection and makes it the default; `use -` goes back to the previous one |
+| `:Dbbliss disconnect [name]` | closes this buffer's (or the named) connection; asks before rolling back an open transaction. Buffers bound to it are unbound; the default falls back to the one before it |
 
 A script stops at the first statement that does not complete and says which one it was; the
 statements after it are not run. The backend splits the text (`script/split`): PostgreSQL at
 semicolons, SQL Server at `GO` lines (`GO 5` repeats the batch), both aware of strings, comments,
 quoted identifiers and, on PostgreSQL, dollar quoting. An error is shown on its line in the buffer
 (as a diagnostic) as well as in the results.
+
+#### Connections and buffers
+
+Each SQL buffer runs on the connection it is bound to, so two windows can work on two databases at once.
+`connect` and `use` bind the buffer you are in. A buffer with no connection is bound, with a message, to the
+*default* on its first `exec`, `plan`, `begin`, `commit` or `rollback`; when the default is a `prod`
+connection it asks first. The default is the connection you made current most recently, and the statusline
+shows what the buffer in that window will use. Disconnecting never moves a buffer to another connection by
+itself: its buffers become unbound. `:Dbbliss status` lists connections most recent first (`*` the default,
+`>` this buffer's).
 
 ### Object info, schema tree, scripting
 

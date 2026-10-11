@@ -93,7 +93,9 @@ the report finds the connection free and no stale report follows a rollback. Sou
 `CLAUDE.md` rules.
 
 ### HLR-CONC-3
-The client shall refuse `connect` for a name that is connected or connecting. Source: decision 18.
+The client shall refuse `connect` for a name that is connecting, and for a name that is connected
+it shall open no second session: the connection already open becomes the current one. Source:
+decision 18; PR-027.
 
 ## Result data
 
@@ -637,6 +639,41 @@ running or paused query. Source: decision 33.
 
 ### LLR-UI-4
 `:Dbbliss` shall dispatch `info`, `tree` and `script` and complete their names. Source: phase 2 plan.
+
+### LLR-UI-5
+`:Dbbliss use <name>` shall bind the current buffer to an open connection and make it the default
+connection (LLR-UI-6); `:Dbbliss use -` shall do the same for the connection that was the default
+before the present one. A name that is not open, or `-` with no previous connection, shall be
+refused with a message and change nothing. The names it completes are the open connections.
+Source: PR-027; user suggestion.
+
+### LLR-UI-6
+The client shall remember the order in which connections were made the default (by connecting, by
+connecting again to an open name, and by `:Dbbliss use`), most recent on top, as a stack; the top is
+the default connection. `:Dbbliss disconnect [name]` shall close the named connection, or the one
+the current buffer is bound to (the default when it is bound to none), and take it off the stack;
+when it was the default, the connection now on top becomes the default, and with none left there is
+no default. Closing a connection that is not the default shall not change the default. Source:
+PR-027; user suggestion.
+
+### LLR-UI-7
+A buffer shall run on the connection it is bound to. Connecting from a buffer, `:Dbbliss use` and
+the first statement command in an unbound buffer (LLR-UI-8) bind it. `exec`, `plan`, `export`,
+`begin`, `commit`, `rollback`, completion and the statusline shall find a buffer's connection by one
+rule (its binding, else the default), so that the connection the statusline shows for a buffer is
+the one its statements run on, whatever the default is. The plugin's own buffers (`dbbliss://...`)
+are not bound. Source: PR-028; decision of the user (per-buffer binding).
+
+### LLR-UI-8
+In an unbound buffer a command that runs statements or changes a transaction shall bind the buffer
+to the default connection and say so. When that connection is `prod` it shall ask first; if the
+answer is no it shall bind nothing and run nothing. With no default connection it shall fail as not
+connected. Source: PR-028; the "no surprise" priority of `CLAUDE.md`.
+
+### LLR-UI-9
+Closing a connection, and the backend ending, shall unbind every buffer bound to it. A bound buffer
+shall never be moved to another connection except by connecting from it, `:Dbbliss use`, or the
+explicit bind of LLR-UI-8. Source: PR-028.
 
 ## Withdrawn
 

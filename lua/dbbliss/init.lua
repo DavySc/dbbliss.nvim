@@ -57,6 +57,8 @@ local state = {
   --- names with a connect request in flight
   connecting = {},
   current = nil, ---@type string?
+  --- names in the order they were current, the current one last (a stack: disconnecting it falls back to the one before)
+  recent = {}, ---@type string[]
   --- query id → { connection (name), connection_id, status, rows, result_sets, on_done }
   queries = {},
   seq = 0,
@@ -210,6 +212,46 @@ end
 
 -- Backend lifecycle -----------------------------------------------------------------------
 
+--- Buffers the plugin shows itself (tree, results, ...) are not SQL buffers and are never bound.
+local function bindable(bufnr)
+  return vim.api.nvim_buf_is_valid(bufnr) and not vim.api.nvim_buf_get_name(bufnr):find('^dbbliss://')
+end
+
+local function bind(bufnr, name)
+  if bindable(bufnr) then
+    vim.b[bufnr].dbbliss_connection = name
+  end
+end
+
+--- Unbinds every buffer bound to `name` (all bound buffers when name is nil): the connection is gone, and a
+--- buffer must not end up on another one without the user choosing it.
+---@return integer count
+local function unbind(name)
+  local n = 0
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    local bound = vim.api.nvim_buf_is_valid(buf) and vim.b[buf].dbbliss_connection or nil
+    if bound and (name == nil or bound == name) then
+      vim.b[buf].dbbliss_connection = nil
+      n = n + 1
+    end
+  end
+  return n
+end
+
+--- The one rule for which connection a buffer's commands, completion and statusline use: the connection it is
+--- bound to, else the default (the top of the stack of recent ones).
+---@return string? name, table? conn, boolean? bound
+local function target(bufnr)
+  local bound = vim.api.nvim_buf_is_valid(bufnr) and vim.b[bufnr].dbbliss_connection or nil
+  if bound and state.connections[bound] then
+    return bound, state.connections[bound], true
+  end
+  local name = state.current
+  if name and state.connections[name] then
+    return name, state.connections[name], false
+  end
+end
+
 local function on_backend_exit(code, signal)
   local had = next(state.connections) ~= nil
   for id, q in pairs(state.queries) do
@@ -226,6 +268,8 @@ local function on_backend_exit(code, signal)
   state.connections = {}
   state.connecting = {}
   state.current = nil
+  state.recent = {}
+  unbind(nil)
   state.backend = nil
   completion.reset()
   refresh()
@@ -370,6 +414,42 @@ end
 
 -- API ---------------------------------------------------------------------------------------
 
+--- Makes `name` the default connection: on top of the stack of recent ones.
+local function make_current(name)
+  state.recent = vim.tbl_filter(function(n)
+    return n ~= name
+  end, state.recent)
+  state.recent[#state.recent + 1] = name
+  state.current = name
+end
+
+--- Binds the current buffer to an open connection and makes it the default one. `-`: the one that was the
+--- default before (toggling between the last two).
+---@param name string?
+function M.use(name)
+  if name == '-' then
+    name = nil
+    for i = #state.recent - 1, 1, -1 do
+      if state.connections[state.recent[i]] then
+        name = state.recent[i]
+        break
+      end
+    end
+    if not name then
+      notify('no previous connection', vim.log.levels.ERROR)
+      return
+    end
+  end
+  if not name or not state.connections[name] then
+    notify(('%s is not connected'):format(name or '(no name given)'), vim.log.levels.ERROR)
+    return
+  end
+  make_current(name)
+  bind(vim.api.nvim_get_current_buf(), name)
+  refresh()
+  notify('using ' .. name)
+end
+
 ---@param name string
 ---@param cb fun(err: table?, conn: table?)?
 function M.connect(name, cb)
@@ -378,15 +458,24 @@ function M.connect(name, cb)
     notify('unknown connection ' .. tostring(name), vim.log.levels.ERROR)
     return
   end
-  if state.connections[name] or state.connecting[name] then
-    -- A second session under the same name would orphan the first, with its transaction and locks.
-    local err = { message = name .. ' is already connected or connecting; disconnect first' }
+  if state.connections[name] then
+    -- A second session under the same name would orphan the first, with its transaction and locks:
+    -- the one that is open becomes the current one instead.
+    M.use(name)
+    if cb then
+      cb(nil, state.connections[name])
+    end
+    return
+  end
+  if state.connecting[name] then
+    local err = { message = name .. ' is already connecting' }
     notify(err.message, vim.log.levels.ERROR)
     if cb then
       cb(err, nil)
     end
     return
   end
+  local from = vim.api.nvim_get_current_buf()
   local b = M.ensure_backend()
   state.connecting[name] = true
   b:request('connect', {
@@ -406,7 +495,8 @@ function M.connect(name, cb)
         server_session_id = result.server_session_id,
         transaction = 'none',
       }
-      state.current = name
+      make_current(name)
+      bind(from, name)
       refresh()
       notify(('connected to %s (%s, session %s)'):format(name, result.engine, result.server_session_id))
     end
@@ -416,12 +506,26 @@ function M.connect(name, cb)
   end)
 end
 
-local function current_connection()
-  local name = state.current
-  local conn = name and state.connections[name]
+--- The connection the current buffer acts on. `opts.bind`: for commands that run statements or change a
+--- transaction; an unbound buffer is then bound to the default (asking first when that is prod).
+---@param opts { bind: boolean? }?
+local function current_connection(opts)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local name, conn, bound = target(bufnr)
   if not conn then
     notify('not connected; use :Dbbliss connect <name>', vim.log.levels.ERROR)
     return nil
+  end
+  if not bound and opts and opts.bind and bindable(bufnr) then
+    if
+      (state.config.connections[name] or {}).env == 'prod'
+      and vim.fn.confirm(('This buffer has no connection. Use %s (PROD)?'):format(name), '&Use\n&Cancel', 2) ~= 1
+    then
+      notify('cancelled: this buffer is not bound to a connection')
+      return nil
+    end
+    bind(bufnr, name)
+    notify(('this buffer now uses %s'):format(name))
   end
   return name, conn
 end
@@ -608,7 +712,7 @@ end
 ---@param cb fun(name: string, conn_id: string, bufnr: integer, statements: dbbliss.Statement[], base_line: integer)
 ---@param opts { skip_confirm: boolean? }?  skip_confirm: nothing is run (a plan), so the prod question for writes is not asked
 local function with_statements(scope, range, cb, opts)
-  local name, conn = current_connection()
+  local name, conn = current_connection({ bind = true })
   if not conn then
     return
   end
@@ -642,7 +746,7 @@ local function with_statements(scope, range, cb, opts)
       notify('nothing to run')
       return
     end
-    vim.b[bufnr].dbbliss_connection = name
+    bind(bufnr, name)
     if not (opts and opts.skip_confirm) and not confirm_writes(name, statements) then
       state.scripts[conn_id] = nil
       notify('cancelled: nothing was run on ' .. name)
@@ -701,12 +805,11 @@ function M._transaction_ended(name)
   flush_schema(name, conn)
 end
 
---- The connection completion reads from for a buffer: the one it last ran on, else the current one.
+--- The connection completion reads from for a buffer: the one `target` finds, the same as for its statements.
 ---@param bufnr integer
 ---@return { id: string, engine: string }?
 function M._completion_connection(bufnr)
-  local name = vim.api.nvim_buf_is_valid(bufnr) and vim.b[bufnr].dbbliss_connection or nil
-  local conn = (name and state.connections[name]) or (state.current and state.connections[state.current])
+  local _, conn = target(bufnr)
   if not conn then
     return nil
   end
@@ -843,7 +946,7 @@ function M.cancel(query_id)
 end
 
 local function transaction(method)
-  local _, conn = current_connection()
+  local _, conn = current_connection({ bind = true })
   if not conn then
     return
   end
@@ -877,10 +980,20 @@ function M.rollback()
   transaction('rollback')
 end
 
-function M.disconnect()
-  local name, conn = current_connection()
-  if not conn then
-    return
+---@param target string?  the connection to close; default the current one
+function M.disconnect(target)
+  local name, conn
+  if target then
+    name, conn = target, state.connections[target]
+    if not conn then
+      notify(('%s is not connected'):format(target), vim.log.levels.ERROR)
+      return
+    end
+  else
+    name, conn = current_connection()
+    if not conn then
+      return
+    end
   end
   local id = conn.id
   local function confirm_rollback()
@@ -904,12 +1017,25 @@ function M.disconnect()
       local n = connection_by_id(id)
       if n then
         state.connections[n] = nil
-        if state.current == n then
-          state.current = nil
+      end
+      state.recent = vim.tbl_filter(function(n)
+        return n ~= name
+      end, state.recent)
+      local unbound = unbind(name)
+      local hint = unbound > 0 and ('; %d buffer(s) unbound'):format(unbound) or ''
+      if state.current == name then
+        -- The one that was current before; names no longer open are skipped.
+        state.current = nil
+        for i = #state.recent, 1, -1 do
+          if state.connections[state.recent[i]] then
+            state.current = state.recent[i]
+            hint = hint .. '; the default is now ' .. state.current
+            break
+          end
         end
       end
       refresh()
-      notify('disconnected from ' .. name)
+      notify('disconnected from ' .. name .. hint)
     end)
   end
   if conn.transaction ~= 'none' then
@@ -923,10 +1049,26 @@ end
 
 function M.status()
   local lines = {}
-  for name, c in pairs(state.connections) do
+  -- Most recent first; `*` marks the default, `>` the connection of this buffer.
+  local here = target(vim.api.nvim_get_current_buf())
+  local order, seen = {}, {}
+  for i = #state.recent, 1, -1 do
+    local n = state.recent[i]
+    if state.connections[n] and not seen[n] then
+      order[#order + 1], seen[n] = n, true
+    end
+  end
+  local rest = vim.tbl_filter(function(n)
+    return not seen[n]
+  end, vim.tbl_keys(state.connections))
+  table.sort(rest)
+  vim.list_extend(order, rest)
+  for _, name in ipairs(order) do
+    local c = state.connections[name]
     local cfg = state.config.connections[name] or {}
-    lines[#lines + 1] = ('%s%s [%s/%s] session %s, transaction %s'):format(
-      name == state.current and '* ' or '  ',
+    lines[#lines + 1] = ('%s%s %s [%s/%s] session %s, transaction %s'):format(
+      name == here and '>' or ' ',
+      name == state.current and '*' or ' ',
       name,
       c.engine,
       cfg.env or '?',
@@ -1252,12 +1394,15 @@ end
 
 -- Statusline -----------------------------------------------------------------------------------
 
---- Connection, environment, transaction and running state for the current connection.
+--- Connection, environment, transaction and running state for the connection the drawn buffer uses.
 ---@param plain boolean?  true: no statusline highlight escapes
 ---@return string
 function M.statusline(plain)
-  local name = state.current
-  local conn = name and state.connections[name]
+  -- For the window being drawn, which is not always the current one.
+  local win = vim.g.statusline_winid
+  local bufnr = (win and win ~= 0 and vim.api.nvim_win_is_valid(win)) and vim.api.nvim_win_get_buf(win)
+    or vim.api.nvim_get_current_buf()
+  local name, conn = target(bufnr)
   if not conn then
     return ''
   end
@@ -1348,7 +1493,13 @@ local subcommands = {
   begin = M.begin,
   commit = M.commit,
   rollback = M.rollback,
-  disconnect = M.disconnect,
+  -- Makes an open connection the current one.
+  use = function(args)
+    M.use(args[1])
+  end,
+  disconnect = function(args)
+    M.disconnect(args[1])
+  end,
   status = M.status,
 }
 
@@ -1371,6 +1522,8 @@ function M.complete(arglead, cmdline)
     candidates = vim.tbl_keys(subcommands)
   elseif words[2] == 'connect' then
     candidates = vim.tbl_keys(state.config.connections)
+  elseif words[2] == 'use' or words[2] == 'disconnect' then
+    candidates = vim.tbl_keys(state.connections)
   elseif words[2] == 'plan' then
     candidates = { 'estimated', 'actual' }
   else

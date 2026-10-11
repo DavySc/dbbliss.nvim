@@ -13,7 +13,9 @@ package.loaded['dbbliss.backend'] = {
     function b:on(method, fn)
       stub.handlers[method] = fn
     end
-    function b:on_exit() end
+    function b:on_exit(fn)
+      stub.exit_handler = fn
+    end
     function b:start() end
     function b:shutdown_sync()
       return true
@@ -73,6 +75,7 @@ local function reset()
   dbbliss.setup({ connections = { a = { engine = 'postgres', connection_string = 'Host=x' } } })
   dbbliss._state.connections = {}
   dbbliss._state.current = nil
+  dbbliss._state.recent = {}
   dbbliss._state.backend = nil
   dbbliss._state.queries = {}
   dbbliss._state.scripts = {}
@@ -146,6 +149,46 @@ local function primed_cache()
   return { gen = 0, columns = {}, names = { state = 'ready', waiters = {}, items = {}, gen = 0, at = 0 } }
 end
 
+--- Two (or more) configured connections named a, b, ... for the case that needs them.
+local function two_connections(extra)
+  local conns = {}
+  for _, n in ipairs(vim.list_extend({ 'a', 'b' }, extra or {})) do
+    conns[n] = { engine = 'postgres', connection_string = 'Host=x' }
+  end
+  dbbliss.setup({ connections = conns })
+end
+
+--- Replaces vim.notify with a collector; returns the list it fills.
+local function capture_notify()
+  local msgs = {}
+  vim.notify = function(m)
+    msgs[#msgs + 1] = m
+  end
+  return msgs
+end
+
+--- A listed, named buffer (as a file would be) holding `lines`, made current.
+local function sql_buffer(lines)
+  local b = vim.api.nvim_create_buf(true, false)
+  vim.api.nvim_set_current_buf(b)
+  vim.api.nvim_buf_set_lines(b, 0, -1, false, lines)
+  return b
+end
+
+--- Runs the whole buffer and returns the connection id of the execute it sent (nil: nothing was sent).
+local function run_and_see_connection()
+  local read = stmt('select 1;', 0)
+  read.kind = 'read'
+  dbbliss.run('buffer')
+  local split = take('script/split')
+  if not split then
+    return nil
+  end
+  split.cb(nil, { statements = { read } })
+  local r = take('execute')
+  return r and r.params.connection_id or nil
+end
+
 local tests = {
   {
     -- Verifies: none (basic lifecycle; no requirement beyond those of the cases below)
@@ -201,6 +244,328 @@ local tests = {
       dbbliss.connect('a')
       answer_all()
       check_no_orphan()
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-6
+    'connection_disconnecting_the_current_one_falls_back_to_the_only_other',
+    '',
+    function()
+      two_connections()
+      dbbliss.connect('a')
+      answer_all()
+      dbbliss.connect('b')
+      answer_all()
+      expect(dbbliss._state.current == 'b', 'the last connect is current')
+      dbbliss.command({ args = 'disconnect', range = 0 })
+      answer_all()
+      expect(dbbliss._state.connections.b == nil, 'b is closed')
+      expect(dbbliss._state.current == 'a', 'a is the only one left and becomes current: ' .. tostring(dbbliss._state.current))
+      check_no_orphan()
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-6
+    'connection_disconnecting_walks_back_through_the_order_they_were_current',
+    '',
+    function()
+      two_connections({ 'c' })
+      for _, n in ipairs({ 'a', 'b', 'c' }) do
+        dbbliss.connect(n)
+        answer_all()
+      end
+      dbbliss.command({ args = 'use a', range = 0 })
+      dbbliss.command({ args = 'use c', range = 0 }) -- order now b, a, c
+      local seen = {}
+      for _ = 1, 3 do
+        dbbliss.command({ args = 'disconnect', range = 0 })
+        answer_all()
+        seen[#seen + 1] = tostring(dbbliss._state.current)
+      end
+      expect(table.concat(seen, ',') == 'a,b,nil', 'each disconnect falls back to the one before: ' .. table.concat(seen, ','))
+      check_no_orphan()
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-6
+    'connection_disconnect_by_name_keeps_the_current_one',
+    '',
+    function()
+      two_connections({ 'c' })
+      for _, n in ipairs({ 'a', 'b', 'c' }) do
+        dbbliss.connect(n)
+        answer_all()
+      end
+      local closing = capture_notify()
+      dbbliss.command({ args = 'disconnect a', range = 0 })
+      answer_all()
+      expect(not table.concat(closing, '\n'):find('default is now', 1, true), 'no switch is announced: ' .. vim.inspect(closing))
+      expect(dbbliss._state.connections.a == nil, 'a is closed')
+      expect(dbbliss._state.connections.b ~= nil and dbbliss._state.current == 'c', 'c stays current: ' .. tostring(dbbliss._state.current))
+      local msgs = capture_notify()
+      dbbliss.command({ args = 'disconnect a', range = 0 })
+      expect(table.concat(msgs, '\n'):find('not connected', 1, true), 'a name that is not open is refused: ' .. vim.inspect(msgs))
+      check_no_orphan()
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-5
+    'connection_use_switches_the_current_one_and_refuses_unknown',
+    '',
+    function()
+      two_connections()
+      dbbliss.connect('a')
+      answer_all()
+      dbbliss.connect('b')
+      answer_all()
+      dbbliss.command({ args = 'use a', range = 0 })
+      expect(dbbliss._state.current == 'a', 'use switches to a')
+      expect(dbbliss.statusline(true):find('a', 1, true) == 1, 'the statusline follows: ' .. dbbliss.statusline(true))
+      local msgs = capture_notify()
+      dbbliss.command({ args = 'use nope', range = 0 })
+      expect(dbbliss._state.current == 'a', 'an unknown name changes nothing')
+      expect(table.concat(msgs, '\n'):find('not connected', 1, true), 'and says so: ' .. vim.inspect(msgs))
+      local got = dbbliss.complete('', 'Dbbliss use ')
+      expect(vim.deep_equal(got, { 'a', 'b' }), 'completes open connections: ' .. vim.inspect(got))
+      dbbliss.command({ args = 'disconnect b', range = 0 })
+      answer_all()
+      expect(vim.deep_equal(dbbliss.complete('', 'Dbbliss use '), { 'a' }), 'a closed connection is no longer offered')
+    end,
+  },
+  {
+    -- Verifies: HLR-CONC-3
+    'connection_connect_of_an_open_name_makes_it_current_without_a_second_session',
+    '',
+    function()
+      two_connections()
+      dbbliss.connect('a')
+      answer_all()
+      dbbliss.connect('b')
+      answer_all()
+      local calls = 0
+      dbbliss.connect('a', function(err, conn)
+        calls = calls + 1
+        expect(err == nil and conn and conn.id == 'c1', 'the callback gets the open connection: ' .. vim.inspect(err))
+      end)
+      answer_all()
+      expect(calls == 1, 'callback called once')
+      expect(dbbliss._state.current == 'a', 'a is current again')
+      expect(vim.tbl_count(stub.open) == 2, 'no third session was opened')
+      check_no_orphan()
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-7
+    'buffer_stays_on_its_connection_when_another_buffer_connects',
+    '28: same rule for exec, completion and statusline',
+    function()
+      two_connections()
+      local b1 = sql_buffer({ 'select 1;' })
+      dbbliss.connect('a')
+      answer_all()
+      local b2 = sql_buffer({ 'select 2;' })
+      dbbliss.connect('b')
+      answer_all()
+      expect(dbbliss._state.current == 'b', 'b is the default')
+      vim.api.nvim_set_current_buf(b1)
+      expect(dbbliss.statusline(true):find('a', 1, true) == 1, 'the statusline shows a here: ' .. dbbliss.statusline(true))
+      expect(dbbliss._completion_connection(b1).id == 'c1', 'completion reads from a')
+      expect(run_and_see_connection() == 'c1', 'the statement ran on a')
+      vim.api.nvim_set_current_buf(b2)
+      expect(dbbliss.statusline(true):find('b', 1, true) == 1, 'and b here: ' .. dbbliss.statusline(true))
+      expect(run_and_see_connection() == 'c2', 'the statement in the other buffer ran on b')
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-5
+    'buffer_use_rebinds_this_buffer_only',
+    '',
+    function()
+      two_connections()
+      local b1 = sql_buffer({ 'select 1;' })
+      dbbliss.connect('a')
+      answer_all()
+      local b2 = sql_buffer({ 'select 2;' })
+      dbbliss.connect('b')
+      answer_all()
+      vim.api.nvim_set_current_buf(b1)
+      dbbliss.command({ args = 'use b', range = 0 })
+      expect(vim.b[b1].dbbliss_connection == 'b' and vim.b[b2].dbbliss_connection == 'b', 'b1 is rebound')
+      dbbliss.command({ args = 'use -', range = 0 })
+      expect(vim.b[b1].dbbliss_connection == 'a' and dbbliss._state.current == 'a', 'use - goes back to a: ' .. tostring(vim.b[b1].dbbliss_connection))
+      expect(vim.b[b2].dbbliss_connection == 'b', 'the other buffer is untouched')
+      local msgs = capture_notify()
+      dbbliss.command({ args = 'use -', range = 0 })
+      dbbliss.command({ args = 'use -', range = 0 })
+      expect(dbbliss._state.current == 'a' and #msgs == 2, 'use - toggles between the last two: ' .. tostring(dbbliss._state.current))
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-5
+    'buffer_use_dash_without_a_previous_connection_is_refused',
+    '',
+    function()
+      sql_buffer({ 'select 1;' })
+      dbbliss.connect('a')
+      answer_all()
+      local msgs = capture_notify()
+      dbbliss.command({ args = 'use -', range = 0 })
+      expect(dbbliss._state.current == 'a', 'nothing changed')
+      expect(#msgs == 1 and msgs[1]:find('previous', 1, true), 'and it says why: ' .. vim.inspect(msgs))
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-8
+    'buffer_unbound_binds_to_the_default_on_first_run_and_says_so',
+    '',
+    function()
+      two_connections()
+      sql_buffer({ 'x' })
+      dbbliss.connect('a')
+      answer_all()
+      local b = sql_buffer({ 'select 1;' }) -- opened after connecting: unbound
+      expect(vim.b[b].dbbliss_connection == nil, 'a new buffer is not bound')
+      local msgs = capture_notify()
+      expect(run_and_see_connection() == 'c1', 'it ran on the default')
+      expect(vim.b[b].dbbliss_connection == 'a', 'and is bound now')
+      expect(table.concat(msgs, '\n'):find('this buffer now uses a', 1, true), 'and said so: ' .. vim.inspect(msgs))
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-8
+    'buffer_unbound_on_a_prod_default_asks_and_declining_runs_nothing',
+    '',
+    function()
+      dbbliss.setup({ connections = { a = { engine = 'postgres', connection_string = 'Host=x', env = 'prod' } } })
+      sql_buffer({ 'x' })
+      dbbliss.connect('a')
+      answer_all()
+      local b = sql_buffer({ 'select 1;' })
+      stub.confirm_answer = 2
+      expect(run_and_see_connection() == nil, 'nothing ran')
+      expect(stub.confirms == 1, 'one question: ' .. stub.confirms)
+      expect(vim.b[b].dbbliss_connection == nil, 'and nothing was bound')
+      stub.confirm_answer = 1
+      expect(run_and_see_connection() == 'c1', 'accepted: it runs')
+      expect(vim.b[b].dbbliss_connection == 'a', 'and binds')
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-8
+    'buffer_unbound_without_a_default_is_not_connected',
+    '',
+    function()
+      local b = sql_buffer({ 'select 1;' })
+      local msgs = capture_notify()
+      expect(run_and_see_connection() == nil, 'nothing ran')
+      expect(table.concat(msgs, '\n'):find('not connected', 1, true), 'says so: ' .. vim.inspect(msgs))
+      expect(vim.b[b].dbbliss_connection == nil, 'nothing bound')
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-9
+    'buffer_disconnect_unbinds_its_buffers_and_never_retargets_them',
+    '',
+    function()
+      two_connections()
+      local b1 = sql_buffer({ 'select 1;' })
+      dbbliss.connect('a')
+      answer_all()
+      local b2 = sql_buffer({ 'select 2;' })
+      dbbliss.connect('b')
+      answer_all()
+      dbbliss.command({ args = 'disconnect b', range = 0 })
+      answer_all()
+      expect(vim.b[b2].dbbliss_connection == nil, 'the buffer of the closed connection is unbound')
+      expect(vim.b[b1].dbbliss_connection == 'a', 'the other keeps its connection')
+      dbbliss.connect('b')
+      answer_all()
+      vim.api.nvim_set_current_buf(b1)
+      expect(run_and_see_connection() == 'c1', 'b1 still runs on a, though b is the default again')
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-9
+    'buffer_backend_exit_unbinds',
+    '',
+    function()
+      local b = sql_buffer({ 'select 1;' })
+      dbbliss.connect('a')
+      answer_all()
+      expect(vim.b[b].dbbliss_connection == 'a', 'bound')
+      stub.exit_handler(1, 0)
+      expect(vim.b[b].dbbliss_connection == nil, 'the backend ended: unbound')
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-7
+    'buffer_plugin_buffers_are_not_bound',
+    '',
+    function()
+      local b = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_name(b, 'dbbliss://schema')
+      vim.api.nvim_set_current_buf(b)
+      dbbliss.connect('a')
+      answer_all()
+      expect(vim.b[b].dbbliss_connection == nil, 'not bound')
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-8
+    'buffer_unbound_begin_binds_to_the_default',
+    '',
+    function()
+      sql_buffer({ 'x' })
+      dbbliss.connect('a')
+      answer_all()
+      local b = sql_buffer({ 'y' })
+      dbbliss.begin()
+      expect(take('transaction/begin') ~= nil, 'begin was sent')
+      expect(vim.b[b].dbbliss_connection == 'a', 'and the buffer is bound')
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-7
+    'buffer_transaction_commands_act_on_the_buffers_connection',
+    '',
+    function()
+      two_connections()
+      local b1 = sql_buffer({ 'x' })
+      dbbliss.connect('a')
+      answer_all()
+      sql_buffer({ 'y' })
+      dbbliss.connect('b')
+      answer_all()
+      vim.api.nvim_set_current_buf(b1)
+      dbbliss.begin()
+      local r = take('transaction/begin')
+      expect(r and r.params.connection_id == 'c1', 'begin went to a: ' .. vim.inspect(r and r.params))
+    end,
+  },
+  {
+    -- Verifies: LLR-UI-6
+    'buffer_status_lists_the_most_recent_first_and_marks_default_and_this_buffer',
+    '',
+    function()
+      two_connections({ 'c' })
+      sql_buffer({ 'x' })
+      for _, n in ipairs({ 'a', 'b', 'c' }) do
+        dbbliss.connect(n)
+        answer_all()
+      end
+      sql_buffer({ 'y' })
+      dbbliss.command({ args = 'use a', range = 0 })
+      local msgs = capture_notify()
+      dbbliss.status()
+      local text = msgs[1]:gsub('^dbbliss: ', '')
+      local lines = vim.split(text, '\n', { plain = true })
+      local names = {}
+      for _, l in ipairs(lines) do
+        names[#names + 1] = l:match('^[> ][* ] (%w+) ')
+      end
+      expect(table.concat(names, ',') == 'a,c,b', 'most recent first: ' .. text)
+      expect(lines[1]:sub(1, 2) == '>*', 'a is this buffer\'s and the default: ' .. lines[1])
+      expect(lines[2]:sub(1, 2) == '  ', 'c is neither: ' .. lines[2])
     end,
   },
   {

@@ -1019,6 +1019,237 @@
         "ask_takes_one_statement_and_asks_for_a_question_when_none_is_given"
       ],
       "verifies": "LLR-AI-8"
+    },
+    {
+      "id": "LUACONN-3",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "closing a connection that is not current is treated as closing the current one",
+      "find": "if state.current == name then\n        -- The one that was current before",
+      "replace": "if state.current ~= name then\n        -- The one that was current before",
+      "tests": [
+        "connection_disconnect_by_name_keeps_the_current_one"
+      ],
+      "verifies": "LLR-UI-6"
+    },
+    {
+      "id": "LUACONN-4",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "use says it switched but does not",
+      "find": "  make_current(name)\n  bind(vim.api.nvim_get_current_buf(), name)",
+      "replace": "  bind(vim.api.nvim_get_current_buf(), name)",
+      "tests": [
+        "connection_use_switches_the_current_one_and_refuses_unknown"
+      ],
+      "verifies": "LLR-UI-5"
+    },
+    {
+      "id": "LUACONN-5",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "connect of an open name leaves the current connection as it was",
+      "find": "    M.use(name)\n    if cb then",
+      "replace": "    if cb then",
+      "tests": [
+        "connection_connect_of_an_open_name_makes_it_current_without_a_second_session"
+      ],
+      "verifies": "HLR-CONC-3"
+    },
+    {
+      "id": "LUACONN-6",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "use completes every configured name, not only the open ones",
+      "find": "elseif words[2] == 'use' or words[2] == 'disconnect' then\n    candidates = vim.tbl_keys(state.connections)",
+      "replace": "elseif words[2] == 'use' or words[2] == 'disconnect' then\n    candidates = vim.tbl_keys(state.config.connections)",
+      "tests": [
+        "connection_use_switches_the_current_one_and_refuses_unknown"
+      ],
+      "verifies": "LLR-UI-5"
+    },
+    {
+      "id": "LUACONN-7",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "disconnecting the current connection never falls back to the one that was current before",
+      "find": "        state.current = nil\n        for i = #state.recent, 1, -1 do",
+      "replace": "        state.current = nil\n        for i = 0, 1, -1 do",
+      "tests": [
+        "connection_disconnecting_the_current_one_falls_back_to_the_only_other",
+        "connection_disconnecting_walks_back_through_the_order_they_were_current"
+      ],
+      "verifies": "LLR-UI-6"
+    },
+    {
+      "id": "LUACONN-8",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the fallback takes the oldest connection instead of the most recent one",
+      "find": "for i = #state.recent, 1, -1 do\n          if state.connections[state.recent[i]] then",
+      "replace": "for i = 1, #state.recent do\n          if state.connections[state.recent[i]] then",
+      "tests": [
+        "connection_disconnecting_walks_back_through_the_order_they_were_current"
+      ],
+      "verifies": "LLR-UI-6"
+    },
+    {
+      "id": "LUACONN-9",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "use does not record the order, so a later disconnect falls back to the wrong connection",
+      "find": "  make_current(name)\n  bind(vim.api.nvim_get_current_buf(), name)\n  refresh()",
+      "replace": "  state.current = name\n  bind(vim.api.nvim_get_current_buf(), name)\n  refresh()",
+      "tests": [
+        "connection_disconnecting_walks_back_through_the_order_they_were_current"
+      ],
+      "verifies": "LLR-UI-6"
+    },
+    {
+      "id": "LUABIND-1",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "a bound buffer is ignored: everything runs on the default",
+      "find": "if bound and state.connections[bound] then\n    return bound",
+      "replace": "if false and bound and state.connections[bound] then\n    return bound",
+      "tests": [
+        "buffer_stays_on_its_connection_when_another_buffer_connects",
+        "buffer_transaction_commands_act_on_the_buffers_connection",
+        "buffer_disconnect_unbinds_its_buffers_and_never_retargets_them"
+      ],
+      "verifies": "LLR-UI-7"
+    },
+    {
+      "id": "LUABIND-2",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "an unbound buffer is bound to a prod default without asking",
+      "find": "      (state.config.connections[name] or {}).env == 'prod'\n      and vim.fn.confirm",
+      "replace": "      false\n      and vim.fn.confirm",
+      "tests": [
+        "buffer_unbound_on_a_prod_default_asks_and_declining_runs_nothing"
+      ],
+      "verifies": "LLR-UI-8"
+    },
+    {
+      "id": "LUABIND-3",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the first statement command in an unbound buffer does not bind it",
+      "find": "    bind(bufnr, name)\n    notify(('this buffer now uses",
+      "replace": "    notify(('this buffer now uses",
+      "tests": [
+        "buffer_unbound_begin_binds_to_the_default"
+      ],
+      "verifies": "LLR-UI-8"
+    },
+    {
+      "id": "LUABIND-4",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "closing a connection leaves the buffers bound to it",
+      "find": "local unbound = unbind(name)",
+      "replace": "local unbound = 0",
+      "tests": [
+        "buffer_disconnect_unbinds_its_buffers_and_never_retargets_them"
+      ],
+      "verifies": "LLR-UI-9"
+    },
+    {
+      "id": "LUABIND-5",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the backend ending leaves buffers bound",
+      "find": "  state.recent = {}\n  unbind(nil)\n",
+      "replace": "  state.recent = {}\n",
+      "tests": [
+        "buffer_backend_exit_unbinds"
+      ],
+      "verifies": "LLR-UI-9"
+    },
+    {
+      "id": "LUABIND-6",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the plugin's own buffers get bound",
+      "find": "return vim.api.nvim_buf_is_valid(bufnr) and not vim.api.nvim_buf_get_name(bufnr):find('^dbbliss://')",
+      "replace": "return vim.api.nvim_buf_is_valid(bufnr)",
+      "tests": [
+        "buffer_plugin_buffers_are_not_bound"
+      ],
+      "verifies": "LLR-UI-7"
+    },
+    {
+      "id": "LUABIND-7",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "connecting from a buffer does not bind it",
+      "find": "      bind(from, name)\n",
+      "replace": "",
+      "tests": [
+        "buffer_stays_on_its_connection_when_another_buffer_connects"
+      ],
+      "verifies": "LLR-UI-7"
+    },
+    {
+      "id": "LUABIND-8",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "use does not bind the current buffer",
+      "find": "  bind(vim.api.nvim_get_current_buf(), name)\n  refresh()\n  notify('using '",
+      "replace": "  refresh()\n  notify('using '",
+      "tests": [
+        "buffer_use_rebinds_this_buffer_only"
+      ],
+      "verifies": "LLR-UI-5"
+    },
+    {
+      "id": "LUABIND-9",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "use - picks the present default instead of the previous one",
+      "find": "for i = #state.recent - 1, 1, -1 do",
+      "replace": "for i = #state.recent, 1, -1 do",
+      "tests": [
+        "buffer_use_rebinds_this_buffer_only"
+      ],
+      "verifies": "LLR-UI-5"
+    },
+    {
+      "id": "LUABIND-10",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the statusline shows the default, not the drawn buffer's connection",
+      "find": "  local name, conn = target(bufnr)\n  if not conn then\n    return ''",
+      "replace": "  local name = state.current\n  local conn = name and state.connections[name]\n  if not conn then\n    return ''",
+      "tests": [
+        "buffer_stays_on_its_connection_when_another_buffer_connects"
+      ],
+      "verifies": "LLR-UI-7"
+    },
+    {
+      "id": "LUABIND-11",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "completion reads from the default, not the buffer's connection",
+      "find": "  local _, conn = target(bufnr)\n  if not conn then\n    return nil",
+      "replace": "  local conn = state.current and state.connections[state.current]\n  if not conn then\n    return nil",
+      "tests": [
+        "buffer_stays_on_its_connection_when_another_buffer_connects"
+      ],
+      "verifies": "LLR-UI-7"
+    },
+    {
+      "id": "LUABIND-12",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "status lists connections in an arbitrary order",
+      "find": "for i = #state.recent, 1, -1 do\n    local n = state.recent[i]",
+      "replace": "for i = 1, #state.recent do\n    local n = state.recent[i]",
+      "tests": [
+        "buffer_status_lists_the_most_recent_first_and_marks_default_and_this_buffer"
+      ],
+      "verifies": "LLR-UI-6"
     }
   ]
 }
