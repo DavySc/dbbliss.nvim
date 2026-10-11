@@ -6,8 +6,7 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 ## Status (2026-10-10)
 
-**Phase 5 (plan viewer, completion) is implemented on branch `ccr-48313f28-j61iv5`; not merged into
-`main`: stop for the user's review.** Built spec-first (`HLR-PLAN-1..8`, `LLR-PLAN-9..12`, `HLR-COMP-1`,
+**Phase 5 (plan viewer, completion) is complete and on `main`** (decisions reviewed and accepted by the user). Built spec-first (`HLR-PLAN-1..8`, `LLR-PLAN-9..12`, `HLR-COMP-1`,
 `LLR-COMP-2..5`) with `spec/tla/Operations.tla` extended for plans. Decisions to review:
 `docs/phase5-decisions.md` (61–67, including what was not checked). Code: `Plans/` (backend),
 `plan.lua`, `completion.lua`, `completion/{blink,cmp,shared}.lua` (Lua); tests in `PlanParserTests.cs`,
