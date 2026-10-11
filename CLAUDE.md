@@ -4,7 +4,7 @@ A Neovim database client (Lua frontend, .NET 10 backend over line-delimited JSON
 for **SQL Server and PostgreSQL**. Priorities, in order: reliability (no silent failures,
 protocol-level cancel, no lost results, no surprise commits), performance, Windows first.
 
-## Status (2026-10-10)
+## Status (2026-10-11)
 
 **Phase 5 (plan viewer, completion) is complete and on `main`** (decisions reviewed and accepted by the user). Built spec-first (`HLR-PLAN-1..8`, `LLR-PLAN-9..12`, `HLR-COMP-1`,
 `LLR-COMP-2..5`) with `spec/tla/Operations.tla` extended for plans. Decisions to review:
@@ -13,7 +13,7 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 `PlanTests.cs`, `PlannerTests.cs`, `CompletionTests.cs`, `PlanScenarios.cs`, `CompletionScenarios.cs`,
 `tests/nvim/plan_test.lua`, `tests/nvim/completion_test.lua`. The blink.cmp / nvim-cmp adapters are
 tested against the documented contract only (neither plugin is installed). The phase began with a harness
-inspection (decision 67, PR-024, PR-025); a follow-up added keyword completion and reload-after-DDL (decisions 68–72; the cache rules are modelled in `spec/tla/CompletionCache.tla`): mutation checks are now recorded in
+inspection (decision 67, PR-024, PR-025); a follow-up (also on `main`) added keyword completion and reload-after-DDL (decisions 68–72; the cache rules are modelled in `spec/tla/CompletionCache.tla`): mutation checks are now recorded in
 `docs/assurance/mutations.json` and replayed by `scripts/assurance/mutate.py` (CI job `mutation`).
 
 **Phase 4 (backup, drop, progress window) is complete and on `main`.** Decisions:
