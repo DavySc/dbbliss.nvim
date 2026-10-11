@@ -411,12 +411,14 @@ function M.refresh()
 end
 
 --- Loads everything again, from the databases down; what was open stays open.
-function M.refresh_all()
+---@param opts { quiet: boolean? }?  quiet: a schema change did it, not the user: say nothing and leave completion alone (it is reloading itself)
+function M.refresh_all(opts)
   local tree = S.current and S.trees[S.current]
   if not tree then
     return
   end
-  if deps.refreshed then
+  local quiet = type(opts) == 'table' and opts.quiet
+  if deps.refreshed and not quiet then
     deps.refreshed(S.current)
   end
   local set = open_keys(tree.roots)
@@ -424,7 +426,9 @@ function M.refresh_all()
   load_children(S.current, nil, function(ok)
     if ok then
       reopen(tree.roots, set)
-      deps.notify('schema browser refreshed')
+      if not quiet then
+        deps.notify('schema browser refreshed')
+      end
     end
   end)
 end

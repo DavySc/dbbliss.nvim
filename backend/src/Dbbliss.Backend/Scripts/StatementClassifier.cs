@@ -42,4 +42,28 @@ public static class StatementClassifier
         if (!QueryStarts.Contains(first)) return StatementKind.Write;
         return words.Any(DataWords.Contains) ? StatementKind.Write : StatementKind.Read;
     }
+
+    private static readonly HashSet<string> SchemaVerbs = new(StringComparer.OrdinalIgnoreCase) { "create", "alter", "drop" };
+
+    /// <summary>
+    /// True when the statement's words say it creates, alters or drops an object, creates a table with
+    /// SELECT ... INTO, or renames one with sp_rename. Errs toward true (a data-modifying CTE that inserts
+    /// INTO a table counts): the price of a false positive is one reload of what completion knows.
+    /// </summary>
+    public static bool ChangesSchema(string text, ScriptDialect dialect)
+    {
+        var words = ScriptSplitter.Words(text, dialect);
+        if (words.Count == 0) return false;
+        var first = words[0];
+        if (SchemaVerbs.Contains(first)) return true;
+        if ((first.Equals("select", StringComparison.OrdinalIgnoreCase) || first.Equals("with", StringComparison.OrdinalIgnoreCase))
+            && words.Any(w => w.Equals("into", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+        if (first.Equals("sp_rename", StringComparison.OrdinalIgnoreCase)) return true;
+        return words.Count > 1
+            && (first.Equals("exec", StringComparison.OrdinalIgnoreCase) || first.Equals("execute", StringComparison.OrdinalIgnoreCase))
+            && words[1].Equals("sp_rename", StringComparison.OrdinalIgnoreCase);
+    }
 }

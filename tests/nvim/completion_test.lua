@@ -40,9 +40,18 @@ local COLUMNS = {
 --- A completion service whose backend is a function that holds its answers until the test lets them go.
 local function fake(opts)
   opts = opts or {}
-  local f = { calls = {}, pending = {}, notes = {}, engine = opts.engine or 'postgres' }
+  local f = { calls = {}, pending = {}, notes = {}, engine = opts.engine or 'postgres', clock = 1000, idle = true }
   completion.reset()
   completion.setup({
+    now = function()
+      return f.clock
+    end,
+    transaction_idle = function()
+      return f.idle
+    end,
+    max_age_s = opts.max_age_s or 0,
+    keywords = opts.keywords ~= false,
+    keyword_case = opts.keyword_case or 'match',
     request = function(conn_id, method, params, cb)
       f.calls[#f.calls + 1] = { conn_id = conn_id, method = method, params = params }
       f.pending[#f.pending + 1] = { method = method, params = params, cb = cb }
@@ -66,7 +75,7 @@ local function fake(opts)
           return p.cb(over.err, nil)
         end
         if method == 'catalog/names' then
-          return p.cb(nil, vim.tbl_extend('force', { names = opts.names or NAMES, truncated = false, limit = 20000 }, over or {}))
+          return p.cb(nil, vim.tbl_extend('force', { names = f.names or opts.names or NAMES, truncated = false, limit = 20000 }, over or {}))
         end
         local key = (p.params.name or ''):lower():gsub('^.*%.', '')
         local doc = COLUMNS[key]
@@ -198,7 +207,7 @@ local tests = {
     -- Verifies: LLR-COMP-3
     'completion_columns_without_a_dot_come_from_the_statements_tables',
     function()
-      local f = fake()
+      local f = fake({ keywords = false })
       local out = labels(f, 'select ', 'select  from orders o join customers c on c.id = o.customer_id')
       eq(out, { 'customer_id', 'id', 'id', 'name', 'total' }, 'the columns of both tables')
       local alone = labels(f, 'select ', 'select ')
@@ -364,6 +373,251 @@ local tests = {
       eq(completion.analyze("select 'it''s' || ", "select 'it''s' || ", 'postgres').kind, 'columns', 'a closed string is just text')
       eq(completion.analyze('select * from [dbo].[Order Line] where ', 'select * from [dbo].[Order Line] where ', 'sqlserver').kind, 'columns', 'bracket quotes on SQL Server')
       eq(completion.analyze('select * from [dbo].[Order Line] where ', 'select * from [dbo].[Order Line] where ', 'sqlserver').tables, { { name = '[dbo].[Order Line]' } }, 'a bracketed name is one name')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-6
+    'completion_offers_statement_opening_keywords_where_a_statement_begins',
+    function()
+      local f = fake()
+      local out = labels(f, '')
+      for _, kw in ipairs({ 'select', 'insert into', 'update', 'delete from', 'create', 'with', 'explain' }) do
+        expect(vim.tbl_contains(out, kw), kw .. ' is offered at the start of a PostgreSQL statement: ' .. table.concat(out, ' '))
+      end
+      expect(not vim.tbl_contains(out, 'where') and not vim.tbl_contains(out, 'exec'), 'clause keywords and SQL Server keywords are not')
+      eq(labels(f, 'ins'), { 'insert into' }, 'filtered by the prefix')
+      local ms = fake({ engine = 'sqlserver' })
+      local ms_out = labels(ms, 'ex')
+      eq(ms_out, { 'exec', 'execute' }, 'SQL Server opens with EXEC, not EXPLAIN')
+      -- after a semicolon a new statement begins
+      local b, st = completion.statement_at({ 'select 1;', 'sel' }, 2, 3)
+      eq(labels(f, b, st), { 'select' }, 'after a semicolon')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-6
+    'completion_offers_clause_and_expression_keywords_inside_a_statement',
+    function()
+      local f = fake()
+      local out = labels(f, 'select * from orders o ')
+      for _, kw in ipairs({ 'where', 'group by', 'order by', 'join', 'left join', 'limit', 'union', 'and', 'in', 'like', 'case', 'null' }) do
+        expect(vim.tbl_contains(out, kw), kw .. ' is offered after a table: ' .. table.concat(out, ' '))
+      end
+      expect(not vim.tbl_contains(out, 'create') and not vim.tbl_contains(out, 'top'), 'statement openers and SQL Server words are not')
+      eq(labels(f, 'select * from orders o wh'), { 'when', 'where' }, 'filtered by the prefix')
+      local ms = fake({ engine = 'sqlserver' })
+      local ms_out = labels(ms, 'select * from orders o ')
+      expect(vim.tbl_contains(ms_out, 'top') and not vim.tbl_contains(ms_out, 'limit'), 'SQL Server has TOP, not LIMIT')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-6
+    'completion_offers_no_keywords_where_only_a_name_or_nothing_can_stand',
+    function()
+      local f = fake()
+      local function kinds(before, statement, fixture)
+        local _, got = labels(fixture or f, before, statement)
+        local k = {}
+        for _, item in ipairs(got.items) do
+          k[item.kind] = true
+        end
+        return k
+      end
+      expect(not kinds('select * from ').keyword, 'after FROM only names')
+      expect(not kinds('select * from a join ').keyword, 'after JOIN only names')
+      expect(not kinds('update ').keyword, 'after UPDATE only names')
+      expect(not kinds('select o.', 'select o. from orders o').keyword, 'after a dot only columns')
+      expect(not kinds("select 'wh").keyword, 'inside a string')
+      expect(not kinds('select 1 -- wh').keyword, 'inside a comment')
+      expect(kinds('select * from orders o ').keyword, 'but they are offered after a table')
+      local off = fake({ keywords = false })
+      eq(labels(off, 'select * from orders o wh'), {}, 'completion.keywords = false turns them off')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-6
+    'completion_ranks_keywords_after_names_and_columns',
+    function()
+      local f = fake()
+      local _, got = labels(f, 'select * from orders where to', 'select * from orders where to')
+      local seen_keyword = false
+      for _, item in ipairs(got.items) do
+        if item.kind == 'keyword' then
+          seen_keyword = true
+        else
+          expect(not seen_keyword, 'a column after a keyword: ' .. item.label)
+        end
+      end
+      local shared = require('dbbliss.completion.shared')
+      local lsp = shared.lsp_items({ items = { { label = 'total', insert = 'total', kind = 'column' }, { label = 'to', insert = 'to', kind = 'keyword' } }, start = 0 }, 1, 0)
+      expect(lsp[1].sortText < lsp[2].sortText, 'sortText puts the column first')
+      eq(lsp[2].kind, 14, 'LSP Keyword kind')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-7
+    'completion_keywords_are_written_in_the_case_of_the_statement',
+    function()
+      local f = fake()
+      local function insert_of(before, statement, opts_f)
+        local _, got = labels(opts_f or f, before, statement)
+        for _, item in ipairs(got.items) do
+          if item.kind == 'keyword' then
+            return item.insert
+          end
+        end
+      end
+      eq(insert_of('select * from orders wh'), 'where', 'a lower case statement gets lower case')
+      eq(insert_of('SELECT * FROM orders wh'), 'WHERE', 'an upper case statement gets upper case')
+      eq(insert_of('select * from orders WH'), 'WHERE', 'an upper case prefix gets upper case')
+      eq(insert_of('select * from orders W'), 'where', 'one letter says nothing')
+      eq(insert_of('sel'), 'select', 'at the start, lower by default')
+      eq(insert_of('SEL'), 'SELECT', 'at the start, upper when typed upper')
+      local up = fake({ keyword_case = 'upper' })
+      eq(insert_of('select * from orders wh', nil, up), 'WHERE', 'completion.keyword_case = upper')
+      local low = fake({ keyword_case = 'lower' })
+      eq(insert_of('SELECT * FROM orders WH', nil, low), 'where', 'completion.keyword_case = lower')
+      local _, got = labels(f, 'select * from orders gro')
+      eq(got.items[#got.items].label, 'group by', 'a keyword of two words is one item')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-8
+    'completion_reloads_the_names_when_ddl_completes_under_autocommit',
+    function()
+      local f = fake()
+      labels(f, 'select * from ')
+      f.names = { { schema = 'public', name = 'orders', kind = 'table' }, { schema = 'public', name = 'brand_new', kind = 'table' } }
+      completion.refresh('c1')
+      eq(f.count('catalog/names'), 2, 'a reload starts at once')
+      local old
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function(r)
+        old = r
+      end)
+      expect(old ~= nil and #old.items > 2, 'the old names are offered while the reload runs')
+      eq(f.count('catalog/names'), 2, 'and no second reload is started')
+      f.answer('catalog/names')
+      local out = labels(f, 'select * from ')
+      expect(vim.tbl_contains(out, 'brand_new'), 'the new table is offered: ' .. table.concat(out, ' '))
+      expect(not vim.tbl_contains(out, 'customers'), 'the dropped ones are not')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-8
+    'completion_waits_for_the_transaction_to_end_before_reloading',
+    function()
+      local f = fake()
+      labels(f, 'select * from ')
+      f.idle = false
+      completion.refresh('c1')
+      eq(f.count('catalog/names'), 2 - 1, 'nothing is reloaded while a transaction is open')
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function() end)
+      eq(f.count('catalog/names'), 1, 'not even by a request for completion')
+      f.idle = true
+      completion.transaction_ended('c1')
+      eq(f.count('catalog/names'), 2, 'the end of the transaction starts the reload')
+      completion.transaction_ended('c1')
+      eq(f.count('catalog/names'), 2, 'once')
+      f.answer('catalog/names')
+      completion.transaction_ended('c1')
+      eq(f.count('catalog/names'), 2, 'and not again when nothing changed')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-10
+    'completion_a_failed_reload_keeps_the_old_items_and_waits_before_trying_again',
+    function()
+      local f = fake()
+      labels(f, 'select * from ')
+      completion.refresh('c1')
+      f.answer('catalog/names', { err = { code = 1005, message = 'gone' } })
+      local out = labels(f, 'select * from ')
+      expect(vim.tbl_contains(out, 'orders'), 'the old names are still offered')
+      eq(f.count('catalog/names'), 2, 'no retry within 10 seconds')
+      f.clock = f.clock + 11
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function() end)
+      eq(f.count('catalog/names'), 3, 'a retry after 10 seconds, at the next request')
+      eq(#f.notes, 0, 'a failed background reload is not shown to the user')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-10
+    'completion_ddl_during_a_reload_makes_its_result_stale',
+    function()
+      local f = fake()
+      labels(f, 'select * from ')
+      completion.refresh('c1')
+      completion.refresh('c1')
+      eq(f.count('catalog/names'), 2, 'one reload at a time')
+      f.names = { { schema = 'public', name = 'first_change', kind = 'table' } }
+      f.answer('catalog/names')
+      eq(f.count('catalog/names'), 3, 'the answer is used, and a reload follows for the second change')
+      expect(vim.tbl_contains(labels(f, 'select * from '), 'first_change'), 'the answer was used meanwhile')
+      f.names = { { schema = 'public', name = 'second_change', kind = 'table' } }
+      f.answer('catalog/names')
+      eq(f.count('catalog/names'), 3, 'now it is current')
+      expect(vim.tbl_contains(labels(f, 'select * from '), 'second_change'), 'the second answer replaced the first')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-10
+    'completion_columns_are_reloaded_lazily_after_ddl',
+    function()
+      local f = fake()
+      labels(f, 'select o.', 'select o. from orders o')
+      eq(f.count('catalog/columns'), 1, 'loaded once')
+      completion.refresh('c1')
+      eq(f.count('catalog/columns'), 1, 'not reloaded by the change itself')
+      local old
+      completion.complete({ conn = conn(), before = 'select o.', statement = 'select o. from orders o' }, function(r)
+        old = r
+      end)
+      eq(#old.items, 3, 'the old columns are offered while they are reloaded')
+      eq(f.count('catalog/columns'), 2, 'the next request for them reloads')
+      local saved = COLUMNS.orders
+      COLUMNS.orders = { schema = 'public', name = 'orders', columns = { { name = 'id', type = 'integer' }, { name = 'added', type = 'text' } } }
+      f.answer('catalog/columns')
+      COLUMNS.orders = saved
+      eq(labels(f, 'select o.', 'select o. from orders o'), { 'added', 'id' }, 'the new columns replaced the old')
+      eq(f.count('catalog/columns'), 2, 'current again')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-11
+    'completion_old_names_are_reloaded_in_the_background',
+    function()
+      local f = fake({ max_age_s = 60 })
+      labels(f, 'select * from ')
+      f.clock = f.clock + 30
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function() end)
+      eq(f.count('catalog/names'), 1, 'young names are not reloaded')
+      f.clock = f.clock + 40
+      local got
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function(r)
+        got = r
+      end)
+      expect(got and #got.items > 0, 'old names are still offered at once')
+      eq(f.count('catalog/names'), 2, 'and reloaded in the background')
+      f.answer('catalog/names')
+      f.clock = f.clock + 100
+      f.idle = false
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function() end)
+      eq(f.count('catalog/names'), 2, 'never while a transaction is open')
+      local never = fake({ max_age_s = 0 })
+      labels(never, 'select * from ')
+      never.clock = never.clock + 100000
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function() end)
+      eq(never.count('catalog/names'), 1, 'max_age_s = 0 turns it off')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-8
+    'completion_refresh_of_a_connection_without_a_cache_does_nothing',
+    function()
+      local f = fake()
+      completion.refresh('c1')
+      completion.transaction_ended('c1')
+      eq(f.count('catalog/names'), 0, 'nothing to reload: the first request loads')
     end,
   },
   {

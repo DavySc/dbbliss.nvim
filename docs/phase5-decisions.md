@@ -106,3 +106,55 @@ viewer at width on a real terminal and with colour schemes other than the defaul
 very large catalog's latency (the 20 000 cap is untested at its edge on a real database); Windows (CI
 only); the e2e tree step on a SQL Server instance that has a second database with a `dbo` schema (a local
 artefact: the test expands every node named `dbo`; not seen in CI).
+
+## Follow-up, 2026-10-11: keywords and refresh after DDL
+
+Asked for by the user after the merge of Phase 5: "expand completion to keywords and design better refresh
+behaviour after ddl runs. DDL should refresh the cache." Requirements `HLR-COMP-6`, `LLR-COMP-7`,
+`HLR-COMP-8`, `LLR-COMP-9..11` (and `LLR-COMP-4` reworded), tests before code as before.
+
+**68. Keywords.** Two hand-written lists, one per dialect (`lua/dbbliss/keywords.lua`), not read from the
+server (PostgreSQL has `pg_get_keywords()`, SQL Server nothing, and reserved words are not what one wants to
+type): statement openers where a statement begins (`select`, `insert into`, `delete from`, `explain`, SQL Server's
+`exec`, `declare`, `go`, ...) and clause and expression keywords inside one (`where`, `group by`, `left join`, `limit`
+or `top`, `is not null`, `case`, ...). A multi-word keyword is one item. None after `x.`, after `FROM`/`JOIN`/
+`UPDATE`/`INTO` (only a name can stand there), or in a string or comment; they rank after names and columns
+(`sortText`, LSP kind Keyword). There is no grammar: inside a statement every clause keyword is offered wherever
+an expression can stand, so `where` is offered after `select 1 ` and in an `INSERT` column list too. Functions
+are not offered (a built-in function list is the natural next step). The case: upper when the typed prefix is
+upper (two letters or more), else the case of the statement's first word, else lower; `completion.keyword_case`
+forces one.
+
+**69. Refresh after DDL.** What triggers it, when it runs, and how it behaves:
+- *Trigger.* The backend marks each statement `ddl` in `script/split` (`CREATE`/`ALTER`/`DROP`, `SELECT ... INTO`,
+  `sp_rename`; errs toward true). The client reloads when such a statement **completes** (a failed one changed
+  nothing). A statement run any other way is not seen: DDL inside a `DO` block, a function or a procedure
+  (`EXEC p`), or by another session or tool. Those are caught by the age rule below, or by refreshing the tree.
+- *When.* Under autocommit at once. In a transaction not until it ends (commit or rollback), because the catalog
+  session is a different session and cannot see uncommitted changes; on SQL Server a reload during the transaction
+  could also wait for the DDL's locks (up to the 30 s catalog timeout, holding the catalog lock). The consequence:
+  inside `BEGIN; CREATE TABLE t ...;` completion does not know `t` until the transaction ends.
+- *How.* Stale-while-revalidate. A schema change makes a connection's cache stale (a generation counter); the old
+  names are offered while one reload runs; success replaces them, failure keeps them and is not retried for 10 s.
+  A change that completes while a reload runs makes that reload's answer stale: it is used, and another reload
+  follows. Columns are not reloaded eagerly (a cache may hold hundreds of tables): a stale table's columns are
+  offered as they are and reloaded when next asked for. The schema tree, if shown for the connection, is reloaded
+  quietly at the same moments.
+- *Age.* Names older than `completion.max_age_s` (default 300 s, 0 = off) are reloaded in the background at the
+  next request, never while a transaction is open. This is what catches other people's DDL, up to that delay late.
+- *Tree refresh (`R`)* now reloads completion instead of dropping it (so completion is never empty while it loads).
+- *Not modelled in `spec/`.* This reads on the catalog session, takes no lease and writes nothing, so none of the
+  models' properties (cancel, lease, transaction decisions, operations) are in play; the one race it has (a reload
+  against a later DDL) is the generation counter, covered by `completion_ddl_during_a_reload_makes_its_result_stale`.
+
+**70. Checks.** 18 more mutation checks (backend classifier and split flag; keyword and refresh logic; the
+`init.lua` wiring) are recorded in `docs/assurance/mutations.json` and all killed. The end-to-end step
+`completion_follows_ddl_without_a_refresh` creates, alters and drops a table through the plugin on both engines and
+sees completion follow each without a refresh. The SQL Server end-to-end tree step no longer expands other
+databases' `dbo` (a local artefact of a second database), so that suite now passes locally too.
+
+**Not checked (follow-up):** the lock wait of a reload on SQL Server against another session's uncommitted DDL (the
+tests use the rule "not while this connection has a transaction open", which does not cover another connection's);
+the background reload's load on a very large catalog every 5 minutes (20 000 names; unmeasured); keyword lists against
+the engines' current grammar (written from memory); behaviour when the machine sleeps and `max_age_s` has long
+passed (one reload at the next request, as intended, but not exercised).

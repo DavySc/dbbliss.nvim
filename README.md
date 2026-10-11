@@ -211,10 +211,23 @@ and locks held while it runs are not undone. Answer No and nothing is sent.
 
 Table, view, function and procedure names after `FROM`, `JOIN`, `UPDATE`, `INTO` and the like; the objects
 of a schema after `schema.`; columns after `alias.` or `table.`, and the columns of the statement's tables
-elsewhere. Names that need quotes are inserted quoted. The names come from the catalog and are cached per
-connection (up to 20 000; you are told when the list was cut); the cache is dropped on disconnect and when
-the schema tree is refreshed (`R`), so **after DDL, refresh the tree**. Completion never waits for the
-server: the first request starts the load and the items appear when it ends.
+elsewhere; and SQL **keywords** of the dialect (statement openers where a statement begins, clause and
+expression keywords inside one, written in the case your statement is written in). Names that need quotes
+are inserted quoted. Completion never waits for the server: it answers from a per-connection cache, and
+the first request starts the load.
+
+**Keeping the cache current.** A statement that creates, alters or drops an object (`CREATE`, `ALTER`, `DROP`,
+`SELECT ... INTO`, `sp_rename`) reloads the names, and the schema tree if it is shown, as soon as it completes. In a
+transaction the reload waits for the commit or rollback: the catalog session cannot see uncommitted changes.
+The old names keep being offered while the reload runs, and a failed reload keeps them. Columns are reloaded
+when next asked for. Names older than `completion.max_age_s` (default 5 minutes) are reloaded in the background,
+which also catches changes made by others. Refreshing the tree (`R`) reloads too. DDL inside a `DO` block, a
+function or a procedure is invisible to the plugin: refresh the tree, or wait for `max_age_s`.
+
+```lua
+require('dbbliss').setup({ completion = { keywords = true, keyword_case = 'match', max_age_s = 300 } })
+-- keyword_case: 'match' (the statement's case), 'upper' or 'lower'; max_age_s = 0 turns the background reload off
+```
 
 It is a completion *source*; the plugin does not need blink.cmp or nvim-cmp, and offers an adapter for each:
 
@@ -228,7 +241,7 @@ require('cmp').register_source('dbbliss', require('dbbliss.completion.cmp').new(
 -- and { name = 'dbbliss' } in the sources of the sql filetype
 ```
 
-Not offered: keywords, parameters, columns of subqueries and CTEs. The adapters were written against the
+Not offered: functions and their parameters, columns of subqueries and CTEs. The adapters were written against the
 plugins' documented interfaces and are not tested against the plugins themselves.
 
 ### Results

@@ -29,6 +29,7 @@ local TRANSACTION_OPEN = 1003
 ---@field results { window_rows: integer, max_col_width: integer }
 ---@field info { max_col_width: integer }
 ---@field tree { show_system: boolean }
+---@field completion { keywords: boolean, keyword_case: 'match'|'upper'|'lower', max_age_s: number }  keywords: offer SQL keywords; max_age_s: reload names older than this in the background (0: never)
 ---@field mappings { info: string|false }  buffer-local keys in SQL buffers
 
 ---@type dbbliss.Config
@@ -38,6 +39,7 @@ local defaults = {
   results = { window_rows = 1000, max_col_width = 40 },
   info = { max_col_width = 200 },
   tree = { show_system = false },
+  completion = { keywords = true, keyword_case = 'match', max_age_s = 300 },
   mappings = { info = '<M-F1>' },
 }
 
@@ -144,7 +146,7 @@ function M.setup(opts)
       M._drop_node(conn_name, node)
     end,
     refreshed = function(conn_id)
-      completion.invalidate(conn_id)
+      completion.refresh(conn_id)
     end,
     show_system = state.config.tree.show_system,
   })
@@ -174,6 +176,13 @@ function M.setup(opts)
     connection_for = function(bufnr)
       return M._completion_connection(bufnr)
     end,
+    transaction_idle = function(conn_id)
+      local _, c = connection_by_id(conn_id)
+      return c == nil or (c.transaction == 'none' and (c.tx_calls or 0) == 0)
+    end,
+    keywords = state.config.completion.keywords,
+    keyword_case = state.config.completion.keyword_case,
+    max_age_s = state.config.completion.max_age_s,
   })
   M._apply_mappings()
   results.setup({
@@ -308,7 +317,11 @@ local function register_handlers(b)
         elseif p.transaction == 'aborted' then
           notify('the transaction on ' .. name .. ' is aborted: only rollback is possible', vim.log.levels.ERROR)
         end
+        local ended = conn.transaction ~= 'none' and p.transaction == 'none'
         conn.transaction = p.transaction
+        if ended then
+          M._transaction_ended(name)
+        end
       end
       if q.on_done then
         q.on_done(p)
@@ -508,6 +521,9 @@ local function run_queue(name, conn_id, bufnr, queue)
       line_offset = unit.line_offset,
       on_done = function(p)
         if p.status == 'completed' then
+          if unit.ddl then
+            M._schema_changed(name)
+          end
           return step(i + 1)
         end
         local e = p.error
@@ -626,6 +642,40 @@ function M.run(scope, range)
     results.clear()
     run_queue(name, conn_id, bufnr, script.expand(statements, base_line))
   end)
+end
+
+--- Reloads the schema tree of a connection quietly, when it has been shown and the schema changed under it.
+local function flush_schema(name, conn)
+  if conn.schema_dirty and tree._state.trees[conn.id] and tree._state.current == conn.id then
+    conn.schema_dirty = false
+    tree.refresh_all({ quiet = true })
+  end
+end
+
+--- A statement that creates, alters or drops an object completed on the connection: what completion and the tree know
+--- about the schema is out of date. Under autocommit they are reloaded now; in a transaction when it ends, because the
+--- catalog session cannot see uncommitted changes (and could wait for their locks).
+---@param name string
+function M._schema_changed(name)
+  local conn = state.connections[name]
+  if not conn then
+    return
+  end
+  conn.schema_dirty = true
+  completion.refresh(conn.id)
+  if conn.transaction == 'none' then
+    flush_schema(name, conn)
+  end
+end
+
+---@param name string
+function M._transaction_ended(name)
+  local conn = state.connections[name]
+  if not conn then
+    return
+  end
+  completion.transaction_ended(conn.id)
+  flush_schema(name, conn)
 end
 
 --- The connection completion reads from for a buffer: the one it last ran on, else the current one.
@@ -753,6 +803,9 @@ local function transaction(method)
     local name, c = connection_by_id(id)
     if c then
       c.transaction = result.transaction
+      if result.transaction == 'none' then
+        M._transaction_ended(name)
+      end
       refresh()
       notify(('%s on %s: transaction %s'):format(method, name, result.transaction))
     end

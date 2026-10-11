@@ -370,8 +370,8 @@
       "runner": "lua-completion",
       "file": "lua/dbbliss/completion.lua",
       "why": "the cache is not used: every request asks the server",
-      "find": "  if entry and entry.state == 'ready' then\n    return cb(entry)\n  end\n  if entry and entry.state == 'loading' then\n    entry.waiters[#entry.waiters + 1] = cb\n    return\n  end\n  entry = { state = 'loading', waiters = { cb } }\n  cache.names = entry",
-      "replace": "  entry = { state = 'loading', waiters = { cb } }\n  cache.names = entry",
+      "find": "  if entry and entry.state == 'ready' then\n    if is_stale(cache, entry)",
+      "replace": "  if false and entry and entry.state == 'ready' then\n    if is_stale(cache, entry)",
       "tests": [
         "completion_answers_from_the_cache_and_never_waits",
         "completion_requests_that_arrive_during_a_load_share_it"
@@ -395,8 +395,8 @@
       "runner": "lua-completion",
       "file": "lua/dbbliss/completion.lua",
       "why": "a failed names load is remembered, so completion never recovers",
-      "find": "      if cache.names == entry then\n        cache.names = nil\n      end",
-      "replace": "",
+      "find": "      elseif slot[key] == entry then\n        slot[key] = nil\n      end",
+      "replace": "      end",
       "tests": [
         "completion_a_failed_load_offers_nothing_and_is_retried_later"
       ],
@@ -506,6 +506,218 @@
         "completion_names_through_the_catalog_session"
       ],
       "verifies": "HLR-COMP-1"
+    },
+    {
+      "id": "DDL-1",
+      "file": "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs",
+      "why": "a CREATE, ALTER or DROP is not a schema change",
+      "find": "if (SchemaVerbs.Contains(first)) return true;",
+      "replace": "if (SchemaVerbs.Contains(first)) return false;",
+      "tests": [
+        "schema_change_cases"
+      ],
+      "verifies": "LLR-COMP-9"
+    },
+    {
+      "id": "DDL-2",
+      "file": "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs",
+      "why": "SELECT ... INTO is not a schema change",
+      "find": "&& words.Any(w => w.Equals(\"into\", StringComparison.OrdinalIgnoreCase)))\n        {\n            return true;",
+      "replace": "&& false)\n        {\n            return true;",
+      "tests": [
+        "schema_change_cases"
+      ],
+      "verifies": "LLR-COMP-9"
+    },
+    {
+      "id": "DDL-3",
+      "file": "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs",
+      "why": "sp_rename is not a schema change",
+      "find": "if (first.Equals(\"sp_rename\", StringComparison.OrdinalIgnoreCase)) return true;",
+      "replace": "",
+      "tests": [
+        "schema_change_cases"
+      ],
+      "verifies": "LLR-COMP-9"
+    },
+    {
+      "id": "DDL-4",
+      "file": "backend/src/Dbbliss.Backend/Backend.cs",
+      "why": "script/split does not say which statements change the schema",
+      "find": "[\"ddl\"] = StatementClassifier.ChangesSchema(unit.Text, engine.Dialect),",
+      "replace": "[\"ddl\"] = false,",
+      "tests": [
+        "script_split_flags_schema_changes"
+      ],
+      "verifies": "LLR-COMP-9"
+    },
+    {
+      "id": "KW-1",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "keywords are never offered",
+      "find": "  if not deps.keywords then",
+      "replace": "  if true then",
+      "tests": [
+        "completion_offers_clause_and_expression_keywords_inside_a_statement"
+      ],
+      "verifies": "HLR-COMP-6"
+    },
+    {
+      "id": "KW-2",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "an upper case prefix does not make upper case keywords",
+      "find": "if #partial >= 2 and partial:match('%a') and partial == partial:upper() then",
+      "replace": "if false then",
+      "tests": [
+        "completion_keywords_are_written_in_the_case_of_the_statement"
+      ],
+      "verifies": "LLR-COMP-7"
+    },
+    {
+      "id": "KW-3",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "the start of a statement is not recognised",
+      "find": "ctx.at_start = n == 0",
+      "replace": "ctx.at_start = false",
+      "tests": [
+        "completion_offers_statement_opening_keywords_where_a_statement_begins"
+      ],
+      "verifies": "HLR-COMP-6"
+    },
+    {
+      "id": "REF-1",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a schema change does not make the cache stale",
+      "find": "cache.gen = cache.gen + 1",
+      "replace": "cache.gen = cache.gen",
+      "tests": [
+        "completion_reloads_the_names_when_ddl_completes_under_autocommit"
+      ],
+      "verifies": "HLR-COMP-8"
+    },
+    {
+      "id": "REF-2",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "the names are reloaded although a transaction is open",
+      "find": "or not deps.transaction_idle(conn_id) then",
+      "replace": "then",
+      "tests": [
+        "completion_waits_for_the_transaction_to_end_before_reloading"
+      ],
+      "verifies": "HLR-COMP-8"
+    },
+    {
+      "id": "REF-3",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a failed reload is retried at every request",
+      "find": "local RETRY_AFTER_FAILURE_S = 10",
+      "replace": "local RETRY_AFTER_FAILURE_S = 0",
+      "tests": [
+        "completion_a_failed_reload_keeps_the_old_items_and_waits_before_trying_again"
+      ],
+      "verifies": "LLR-COMP-10"
+    },
+    {
+      "id": "REF-4",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a schema change during a reload is forgotten",
+      "find": "and entry.gen < cache.gen and deps.transaction_idle(conn.id) then",
+      "replace": "and false then",
+      "tests": [
+        "completion_ddl_during_a_reload_makes_its_result_stale"
+      ],
+      "verifies": "LLR-COMP-10"
+    },
+    {
+      "id": "REF-5",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "names never get too old",
+      "find": "return deps.max_age_s > 0 and deps.now() - entry.at > deps.max_age_s",
+      "replace": "return false",
+      "tests": [
+        "completion_old_names_are_reloaded_in_the_background"
+      ],
+      "verifies": "LLR-COMP-11"
+    },
+    {
+      "id": "REF-6",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "an old entry is reloaded while a transaction is open",
+      "find": "if is_stale(cache, entry) and not entry.reloading and deps.transaction_idle(conn.id)\n",
+      "replace": "if is_stale(cache, entry) and not entry.reloading and true\n",
+      "tests": [
+        "completion_old_names_are_reloaded_in_the_background"
+      ],
+      "verifies": "LLR-COMP-11"
+    },
+    {
+      "id": "INIT-1",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "a completed DDL statement does not refresh completion",
+      "find": "          if unit.ddl then\n            M._schema_changed(name)",
+      "replace": "          if false then\n            M._schema_changed(name)",
+      "tests": [
+        "ddl_that_completes_reloads_completion_under_autocommit"
+      ],
+      "verifies": "HLR-COMP-8"
+    },
+    {
+      "id": "INIT-2",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the end of a transaction does not reload completion",
+      "find": "        if ended then\n          M._transaction_ended(name)",
+      "replace": "        if false then\n          M._transaction_ended(name)",
+      "tests": [
+        "ddl_in_a_transaction_reloads_completion_when_the_transaction_ends"
+      ],
+      "verifies": "HLR-COMP-8"
+    },
+    {
+      "id": "INIT-3",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "a tree refresh drops completion instead of reloading it",
+      "find": "      completion.refresh(conn_id)\n    end,\n    show_system",
+      "replace": "      completion.invalidate(conn_id)\n    end,\n    show_system",
+      "tests": [
+        "completion_cache_is_dropped_on_disconnect_and_reloaded_on_a_tree_refresh"
+      ],
+      "verifies": "LLR-COMP-11"
+    },
+    {
+      "id": "INIT-4",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the tree is not reloaded after a schema change",
+      "find": "  if conn.transaction == 'none' then\n    flush_schema(name, conn)\n  end\nend\n\n---@param name string\nfunction M._transaction_ended",
+      "replace": "  if false then\n    flush_schema(name, conn)\n  end\nend\n\n---@param name string\nfunction M._transaction_ended",
+      "tests": [
+        "ddl_reloads_the_schema_tree_when_it_is_shown_and_waits_for_a_transaction"
+      ],
+      "verifies": "HLR-COMP-8"
+    },
+    {
+      "id": "INIT-5",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "a DDL that failed still reloads",
+      "find": "        if p.status == 'completed' then\n          if unit.ddl then",
+      "replace": "        if true then\n          if unit.ddl then",
+      "tests": [
+        "ddl_that_fails_reloads_nothing"
+      ],
+      "verifies": "HLR-COMP-8"
     }
   ]
 }

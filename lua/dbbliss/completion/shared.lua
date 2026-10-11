@@ -8,8 +8,8 @@ function M.is_sql(filetype)
   return SQL[filetype] == true
 end
 
--- vim.lsp.protocol.CompletionItemKind: Method 2, Function 3, Field 5, Module 9, Interface 8, Struct 22.
-local KIND = { column = 5, table = 22, view = 8, ['function'] = 3, procedure = 2, schema = 9 }
+-- vim.lsp.protocol.CompletionItemKind: Method 2, Function 3, Field 5, Interface 8, Module 9, Keyword 14, Struct 22.
+local KIND = { column = 5, table = 22, view = 8, ['function'] = 3, procedure = 2, schema = 9, keyword = 14 }
 
 --- Items in the LSP shape, each replacing the word being typed (from result.start to the cursor).
 ---@param result { items: table[], start: integer }
@@ -25,6 +25,8 @@ function M.lsp_items(result, row, col)
       detail = item.detail,
       insertText = item.insert,
       filterText = item.label,
+      -- Names and columns before keywords.
+      sortText = (item.kind == 'keyword' and '9' or '1') .. item.label,
       textEdit = { newText = item.insert, range = range },
     }
   end

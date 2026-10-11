@@ -247,17 +247,21 @@ local steps = {
       wait('the databases', function()
         return #tree.lines() > 1 and not table.concat(tree.lines(), '\n'):find('loading', 1, true)
       end)
+      -- On SQL Server only master's nodes: another database of the server may have a dbo schema too.
+      local function in_master(n)
+        return pg or n.name == 'master' or (n.path ~= nil and n.path.database == 'master')
+      end
       local path = pg and { 'public', 'Tables' } or { 'master', 'dbo', 'Tables' }
       for _, name in ipairs(path) do
         wait('the line ' .. name, function()
           for _, n in pairs(tree._state.line_nodes) do
-            if n.name == name then
+            if n.name == name and in_master(n) then
               return true
             end
           end
         end)
         for l, n in pairs(tree._state.line_nodes) do
-          if n.name == name then
+          if n.name == name and in_master(n) then
             vim.api.nvim_win_set_cursor(vim.fn.win_findbuf(tree._state.buf)[1], { l, 0 })
             if not n.expanded then
               tree.activate()
@@ -465,6 +469,79 @@ local steps = {
       end)
       sql(pg and 'drop table if exists e2e_plan_t' or "if object_id('dbo.e2e_plan_t') is not null drop table dbo.e2e_plan_t")
       wipe()
+      if not ok then
+        error(err, 0)
+      end
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-1, HLR-COMP-6, HLR-COMP-8
+    'completion_follows_ddl_without_a_refresh',
+    function()
+      local completion = require('dbbliss.completion')
+      local t = 'e2e_comp_t'
+      local function sql(statement)
+        buffer({ statement })
+        dbbliss.run('buffer')
+        wait('the statement', idle)
+      end
+      --- What completion offers for `line` with the cursor at its end (waits for a load to end).
+      local function offered(line, row)
+        local b = buffer({ line })
+        local got
+        completion.for_buffer(b, 1, #line, function(r)
+          got = r
+        end)
+        wait('completion', function()
+          return got ~= nil
+        end)
+        local set = {}
+        for _, item in ipairs(got.items) do
+          set[item.label] = item.kind
+        end
+        return set
+      end
+      local function eventually(what, line, expected_present, label)
+        wait(what, function()
+          local set = offered(line)
+          return (set[label] ~= nil) == expected_present
+        end)
+      end
+      sql(pg and 'drop table if exists e2e_comp_t' or "if object_id('dbo.e2e_comp_t') is not null drop table dbo.e2e_comp_t")
+      local ok, err = pcall(function()
+        expect(offered('select * from ')[t] == nil, 'the table is not there yet')
+        sql('create table ' .. (pg and '' or 'dbo.') .. t .. ' (id int, label varchar(20))')
+        eventually('the new table in completion', 'select * from ', true, t)
+        local cols = offered('select c. from ' .. t .. ' c')
+        expect(cols.id == nil, 'the cursor is at the end of the line, not after "c."')
+        local line = 'select c. from ' .. t .. ' c'
+        local b = buffer({ line })
+        local function columns()
+          local got
+          completion.for_buffer(b, 1, #'select c.', function(r)
+            got = r
+          end)
+          wait('columns', function()
+            return got ~= nil
+          end)
+          local set = {}
+          for _, item in ipairs(got.items) do
+            set[item.label] = true
+          end
+          return set
+        end
+        local first = columns()
+        expect(first.id and first.label and not first.extra, 'the columns of the new table')
+        sql('alter table ' .. (pg and '' or 'dbo.') .. t .. ' add extra int')
+        wait('the new column in completion', function()
+          b = buffer({ line })
+          return columns().extra == true
+        end)
+        expect(offered('select * from ' .. t .. ' wh').where == 'keyword', 'keywords are offered after a table')
+        sql('drop table ' .. (pg and '' or 'dbo.') .. t)
+        eventually('the dropped table gone from completion', 'select * from ', false, t)
+      end)
+      sql(pg and 'drop table if exists e2e_comp_t' or "if object_id('dbo.e2e_comp_t') is not null drop table dbo.e2e_comp_t")
       if not ok then
         error(err, 0)
       end

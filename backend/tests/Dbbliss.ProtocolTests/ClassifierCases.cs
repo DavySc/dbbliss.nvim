@@ -65,4 +65,50 @@ public static class ClassifierCases
             .ToList();
         if (failures.Count > 0) throw new TestFailure($"{failures.Count} of {Cases.Length} cases failed:\n  " + string.Join("\n  ", failures));
     }
+
+    // Statements that change what completion and the schema tree list: erring toward true costs a reload,
+    // erring toward false leaves a new table out of completion.
+    private static readonly (ScriptDialect Dialect, string Sql, bool Expected)[] SchemaChangeCases =
+    [
+        (Pg, "create table t (id int)", true),
+        (Pg, "CREATE OR REPLACE FUNCTION f() RETURNS int AS 'select 1' LANGUAGE sql", true),
+        (Pg, "  -- make it\ncreate index i on t (id)", true),
+        (Pg, "alter table t add column c int", true),
+        (Pg, "drop table if exists t", true),
+        (Pg, "select * into t2 from t", true),
+        (Pg, "with a as (select 1 as x) select x into t3 from a", true),
+        (Pg, "create table t2 as select 1", true),
+        (Pg, "select 1", false),
+        (Pg, "select 'create table t (id int)'", false),
+        (Pg, "select \"drop\" from t", false),
+        (Pg, "insert into t values (1)", false),
+        (Pg, "update t set x = 1", false),
+        (Pg, "delete from t", false),
+        (Pg, "truncate t", false),
+        (Pg, "begin", false),
+        (Pg, "commit", false),
+        (Pg, "", false),
+        (Ms, "create table dbo.t (id int)", true),
+        (Ms, "alter procedure p as select 1", true),
+        (Ms, "drop view v", true),
+        (Ms, "select * into #tmp from t", true),
+        (Ms, "exec sp_rename 'dbo.t', 'u'", true),
+        (Ms, "EXECUTE sp_rename @objname = 'dbo.t', @newname = 'u'", true),
+        (Ms, "sp_rename 'dbo.t', 'u'", true),
+        (Ms, "exec sp_who", false),
+        (Ms, "exec p", false),
+        (Ms, "select top 5 * from t", false),
+        (Ms, "insert t values (1)", false),
+        (Ms, "use master", false),
+    ];
+
+    public static void SchemaChanges()
+    {
+        var failures = SchemaChangeCases
+            .Select(c => (c, actual: StatementClassifier.ChangesSchema(c.Sql, c.Dialect)))
+            .Where(r => r.actual != r.c.Expected)
+            .Select(r => $"{r.c.Dialect} {r.c.Sql.Replace("\n", "\\n")}: got {r.actual}, expected {r.c.Expected}")
+            .ToList();
+        if (failures.Count > 0) throw new TestFailure($"{failures.Count} of {SchemaChangeCases.Length} cases failed:\n  " + string.Join("\n  ", failures));
+    }
 }

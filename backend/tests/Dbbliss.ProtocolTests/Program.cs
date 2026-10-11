@@ -60,6 +60,8 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("error_lines_of_every_kind", "", FailureCases.ErrorLinesOfEveryKind),
     // Verifies: HLR-PROD-1
     ("script_split_reports_kinds", "", RobustnessCases.ScriptSplitReportsKinds),
+    // Verifies: LLR-COMP-9
+    ("script_split_flags_schema_changes", "", RobustnessCases.ScriptSplitFlagsSchemaChanges),
     // Verifies: HLR-TX-4
     ("shutdown_is_bounded", "", FailureCases.ShutdownIsBounded),
     // Verifies: HLR-TX-4
@@ -100,6 +102,8 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("splitter_cases", "", () => { SplitterCases.Run(); return Task.CompletedTask; }),
     // Verifies: LLR-CLASS-1, HLR-PROD-1
     ("classifier_cases", "", () => { ClassifierCases.Run(); return Task.CompletedTask; }),
+    // Verifies: LLR-COMP-9
+    ("schema_change_cases", "", () => { ClassifierCases.SchemaChanges(); return Task.CompletedTask; }),
     // Verifies: HLR-DATA-1
     ("value_conversion_cases", "", () => { ValueCases.Run(); return Task.CompletedTask; }),
     // Verifies: HLR-EXPORT-1

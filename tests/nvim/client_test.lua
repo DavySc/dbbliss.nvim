@@ -140,6 +140,11 @@ local function expect(cond, msg)
   end
 end
 
+--- A completion cache whose names are loaded, as after a first completion request.
+local function primed_cache()
+  return { gen = 0, columns = {}, names = { state = 'ready', waiters = {}, items = {}, gen = 0, at = 0 } }
+end
+
 local tests = {
   {
     -- Verifies: none (basic lifecycle; no requirement beyond those of the cases below)
@@ -601,23 +606,106 @@ local tests = {
     end,
   },
   {
-    -- Verifies: LLR-COMP-4
-    'completion_cache_is_dropped_on_disconnect_and_on_a_tree_refresh',
+    -- Verifies: LLR-COMP-4, LLR-COMP-11
+    'completion_cache_is_dropped_on_disconnect_and_reloaded_on_a_tree_refresh',
     '',
     function()
       script_setup({ 'select 1;' })
       local completion = require('dbbliss.completion')
       local tree = require('dbbliss.tree')
-      completion._state.caches['c1'] = { columns = {} }
+      completion._state.caches['c1'] = primed_cache()
       tree._state.trees['c1'] = { roots = {} }
       tree._state.current = 'c1'
       tree.refresh_all()
-      expect(completion._state.caches['c1'] == nil, 'a refresh of the schema tree drops the cache')
+      local cache = completion._state.caches['c1']
+      expect(cache ~= nil and cache.names ~= nil, 'a refresh of the schema tree keeps what is cached (stale-while-revalidate)')
+      expect(take('catalog/names') ~= nil, 'and reloads the names')
       take('catalog/children')
-      completion._state.caches['c1'] = { columns = {} }
       dbbliss.disconnect()
       take('disconnect').cb(nil, { rolled_back = false })
       expect(completion._state.caches['c1'] == nil, 'a disconnect drops the cache')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-8
+    'ddl_that_completes_reloads_completion_under_autocommit',
+    '',
+    function()
+      script_setup({ 'create table t (id int);', 'select 1;' })
+      local completion = require('dbbliss.completion')
+      completion._state.caches['c1'] = primed_cache()
+      dbbliss.run('buffer')
+      local ddl = stmt('create table t (id int);', 0)
+      ddl.ddl = true
+      take('script/split').cb(nil, { statements = { ddl, stmt('select 1;', 1) } })
+      expect(take('catalog/names') == nil, 'nothing is reloaded before the statement completes')
+      finish_query()
+      expect(take('catalog/names') ~= nil, 'the names are reloaded when the DDL completed')
+      finish_query()
+      expect(take('catalog/names') == nil, 'a plain statement reloads nothing')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-8
+    'ddl_reloads_the_schema_tree_when_it_is_shown_and_waits_for_a_transaction',
+    '',
+    function()
+      script_setup({ 'create table t (id int);' })
+      local tree = require('dbbliss.tree')
+      tree._state.trees['c1'] = { roots = {} }
+      tree._state.current = 'c1'
+      dbbliss.run('buffer')
+      local ddl = stmt('create table t (id int);', 0)
+      ddl.ddl = true
+      take('script/split').cb(nil, { statements = { ddl } })
+      finish_query()
+      expect(take('catalog/children') ~= nil, 'under autocommit the tree is reloaded at once')
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { ddl } })
+      finish_query({ transaction = 'active' })
+      dbbliss._state.connections.a.transaction = 'active'
+      expect(take('catalog/children') == nil, 'the tree is not reloaded while the transaction is open')
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { stmt('commit;', 0) } })
+      finish_query({ transaction = 'none' })
+      expect(take('catalog/children') ~= nil, 'the tree is reloaded when the transaction ends')
+      tree._state.trees['c1'] = nil
+      tree._state.current = nil
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-8
+    'ddl_that_fails_reloads_nothing',
+    '',
+    function()
+      script_setup({ 'create table t (id int);' })
+      local completion = require('dbbliss.completion')
+      completion._state.caches['c1'] = primed_cache()
+      dbbliss.run('buffer')
+      local ddl = stmt('create table t (id int);', 0)
+      ddl.ddl = true
+      take('script/split').cb(nil, { statements = { ddl } })
+      finish_query({ status = 'error', error = { message = 'exists' } })
+      expect(take('catalog/names') == nil, 'a failed DDL changed nothing')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-8
+    'ddl_in_a_transaction_reloads_completion_when_the_transaction_ends',
+    '',
+    function()
+      script_setup({ 'create table t (id int);', 'commit;' })
+      local completion = require('dbbliss.completion')
+      completion._state.caches['c1'] = primed_cache()
+      dbbliss.run('buffer')
+      local ddl = stmt('create table t (id int);', 0)
+      ddl.ddl = true
+      take('script/split').cb(nil, { statements = { ddl, stmt('commit;', 1) } })
+      finish_query({ transaction = 'active' })
+      dbbliss._state.connections.a.transaction = 'active'
+      expect(take('catalog/names') == nil, 'not while the transaction is open: the catalog session cannot see it')
+      finish_query({ transaction = 'none' })
+      expect(take('catalog/names') ~= nil, 'the commit starts the reload')
     end,
   },
   {

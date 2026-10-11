@@ -122,4 +122,13 @@ public static class RobustnessCases
         var kinds = string.Join(",", result["statements"]!.AsArray().Select(x => x!["kind"]!.GetValue<string>()));
         if (kinds != "read,write,read") throw new TestFailure("kinds: " + kinds);
     }
+
+    // A statement that changes the schema says so, per statement, so the client can reload what it knows.
+    public static async Task ScriptSplitFlagsSchemaChanges()
+    {
+        await using var h = new Harness();
+        var result = await h.ResultAsync("script/split", new JsonObject { ["engine"] = "fake", ["text"] = "select 1; create table t (id int); drop table t; insert into t values (1)" });
+        var flags = string.Join(",", result["statements"]!.AsArray().Select(x => x!["ddl"]!.GetValue<bool>() ? "ddl" : "plain"));
+        if (flags != "plain,ddl,ddl,plain") throw new TestFailure("ddl flags: " + flags);
+    }
 }

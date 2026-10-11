@@ -6,6 +6,8 @@
 -- The text analysis is a tokenizer plus a few rules, not a parser: it reads the statement the cursor is
 -- in (found by `;` and blank lines), which is enough for FROM/JOIN lists, aliases and `alias.` columns.
 -- Subqueries and CTEs are not resolved: a column of a derived table is not offered.
+local keywords = require('dbbliss.keywords')
+
 local M = {}
 
 local deps = {
@@ -18,7 +20,20 @@ local deps = {
   connection_for = function()
     return nil
   end,
+  --- True when no transaction is open on the connection: only then is a reload worth doing (the catalog
+  --- session cannot see uncommitted changes, and could wait for their locks).
+  transaction_idle = function()
+    return true
+  end,
+  now = function()
+    return vim.uv.now() / 1000
+  end,
+  max_age_s = 300, -- names older than this are reloaded in the background; 0 turns it off
+  keywords = true,
+  keyword_case = 'match', -- 'match' | 'upper' | 'lower'
 }
+
+local RETRY_AFTER_FAILURE_S = 10
 
 local S = {
   caches = {}, ---@type table<string, table>  connection id -> { names = , columns = {} }
@@ -319,6 +334,7 @@ function M.analyze(before, statement, engine)
     end
   end
   ctx.kind = 'columns'
+  ctx.at_start = n == 0
   if kw and OBJECT_KW[kw] then
     local tail = {}
     for j = at + 1, n do
@@ -397,89 +413,148 @@ end
 local function cache_of(conn)
   local c = S.caches[conn.id]
   if not c then
-    c = { names = nil, columns = {} }
+    c = { names = nil, columns = {}, gen = 0 }
     S.caches[conn.id] = c
   end
   return c
 end
 
---- Calls back with the connection's names ({ items } or nil when the load failed). One load serves every request
---- made while it runs; a failed load is forgotten so the next request tries again.
-local function with_names(conn, cb)
-  local cache = cache_of(conn)
-  local entry = cache.names
-  if entry and entry.state == 'ready' then
-    return cb(entry)
+--- Data is stale when a schema change completed after it was asked for, or when it is older than max_age_s.
+local function is_stale(cache, entry)
+  if entry.gen < cache.gen then
+    return true
   end
-  if entry and entry.state == 'loading' then
-    entry.waiters[#entry.waiters + 1] = cb
-    return
+  return deps.max_age_s > 0 and deps.now() - entry.at > deps.max_age_s
+end
+
+local function call_all(waiters, entry)
+  for _, w in ipairs(waiters) do
+    w(entry)
   end
-  entry = { state = 'loading', waiters = { cb } }
-  cache.names = entry
-  deps.request(conn.id, 'catalog/names', {}, function(err, result)
-    local waiters = entry.waiters
-    entry.waiters = {}
+end
+
+--- Asks the backend for an entry's data: the first load, or a reload that keeps the old data until the new arrives.
+--- `slot` holds the entry; `method`, `params` say what to ask; `apply(entry, result)` stores the answer.
+local function load(conn, cache, slot, key, method, params, apply)
+  local entry = slot[key]
+  local reload = entry ~= nil and entry.state == 'ready'
+  if not reload then
+    entry = { state = 'loading', waiters = {}, gen = cache.gen, at = deps.now() }
+    slot[key] = entry
+  else
+    entry.reloading = true
+  end
+  local asked = cache.gen
+  deps.request(conn.id, method, params, function(err, result)
     if err or not result then
-      if cache.names == entry then
-        cache.names = nil
+      if reload then
+        entry.reloading = false
+        entry.failed_at = deps.now()
+      elseif slot[key] == entry then
+        slot[key] = nil
       end
-      for _, w in ipairs(waiters) do
-        w(nil)
+      local waiters = entry.waiters
+      entry.waiters = {}
+      if not reload then
+        call_all(waiters, nil)
       end
       return
     end
-    local items, seen = {}, {}
-    for _, n in ipairs(result.names or {}) do
-      local key = n.schema .. '\0' .. n.name .. '\0' .. n.kind
-      if not seen[key] then
-        seen[key] = true
-        items[#items + 1] = n
-      end
-    end
-    entry.state, entry.items = 'ready', items
-    if result.truncated and not cache.notified then
-      cache.notified = true
-      deps.notify(
-        ('completion: the database has more than %d names; only the first %d are offered'):format(result.limit or #items, result.limit or #items),
-        vim.log.levels.INFO
-      )
-    end
-    for _, w in ipairs(waiters) do
-      w(entry)
+    apply(entry, result)
+    entry.state, entry.reloading, entry.failed_at = 'ready', false, nil
+    entry.gen, entry.at = asked, deps.now()
+    local waiters = entry.waiters
+    entry.waiters = {}
+    call_all(waiters, entry)
+    -- A schema change completed while this was loading: what arrived may already be out of date.
+    if S.caches[conn.id] == cache and is_stale(cache, entry) and entry.gen < cache.gen and deps.transaction_idle(conn.id) then
+      load(conn, cache, slot, key, method, params, apply)
     end
   end)
 end
 
-local function with_columns(conn, name, cb)
+--- Gives `cb` the entry once it is ready: at once from the cache, otherwise when the first load ends. A stale
+--- entry is given as it is, and reloaded in the background when that is allowed.
+local function with_entry(conn, slot, key, method, params, apply, cb)
   local cache = cache_of(conn)
-  local key = name:lower()
-  local entry = cache.columns[key]
+  local entry = slot[key]
   if entry and entry.state == 'ready' then
+    if is_stale(cache, entry) and not entry.reloading and deps.transaction_idle(conn.id)
+      and (not entry.failed_at or deps.now() - entry.failed_at >= RETRY_AFTER_FAILURE_S) then
+      load(conn, cache, slot, key, method, params, apply)
+    end
     return cb(entry)
   end
   if entry and entry.state == 'loading' then
     entry.waiters[#entry.waiters + 1] = cb
     return
   end
-  entry = { state = 'loading', waiters = { cb } }
-  cache.columns[key] = entry
-  deps.request(conn.id, 'catalog/columns', { name = name }, function(err, result)
-    local waiters = entry.waiters
-    entry.waiters = {}
-    if err or not result then
-      if cache.columns[key] == entry then
-        cache.columns[key] = nil
-      end
-      for _, w in ipairs(waiters) do
-        w(nil)
-      end
-      return
+  load(conn, cache, slot, key, method, params, apply)
+  slot[key].waiters[1] = cb
+end
+
+local function apply_names(entry, result)
+  local items, seen = {}, {}
+  for _, n in ipairs(result.names or {}) do
+    local k = n.schema .. '\0' .. n.name .. '\0' .. n.kind
+    if not seen[k] then
+      seen[k] = true
+      items[#items + 1] = n
     end
-    entry.state, entry.doc = 'ready', result
-    for _, w in ipairs(waiters) do
-      w(entry)
+  end
+  entry.items = items
+  entry.truncated, entry.limit = result.truncated, result.limit
+end
+
+--- Calls back with the connection's names ({ items } or nil when the first load failed).
+local function with_names(conn, cb)
+  local cache = cache_of(conn)
+  local slot = cache
+  with_entry(conn, slot, 'names', 'catalog/names', {}, function(entry, result)
+    apply_names(entry, result)
+    if result.truncated and not cache.notified then
+      cache.notified = true
+      deps.notify(
+        ('completion: the database has more than %d names; only the first %d are offered'):format(result.limit or #entry.items, result.limit or #entry.items),
+        vim.log.levels.INFO
+      )
     end
+  end, cb)
+end
+
+local function with_columns(conn, name, cb)
+  local cache = cache_of(conn)
+  with_entry(conn, cache.columns, name:lower(), 'catalog/columns', { name = name }, function(entry, result)
+    entry.doc = result
+  end, cb)
+end
+
+--- A statement changed the schema (or the tree was refreshed): what is cached about the connection is stale from
+--- now on. The names are reloaded at once unless a transaction is open (then when it ends); the columns of a
+--- table when they are next asked for. Nothing cached, nothing to do: the first request loads.
+---@param conn_id string
+function M.refresh(conn_id)
+  local cache = S.caches[conn_id]
+  if not cache then
+    return
+  end
+  cache.gen = cache.gen + 1
+  M.transaction_ended(conn_id)
+end
+
+--- The transaction on the connection ended: reload the names if they are stale.
+---@param conn_id string
+function M.transaction_ended(conn_id)
+  local cache = S.caches[conn_id]
+  local entry = cache and cache.names
+  if not entry or entry.state ~= 'ready' or entry.reloading or not is_stale(cache, entry) or not deps.transaction_idle(conn_id) then
+    return
+  end
+  if entry.failed_at and deps.now() - entry.failed_at < RETRY_AFTER_FAILURE_S then
+    return
+  end
+  load({ id = conn_id }, cache, cache, 'names', 'catalog/names', {}, function(e, result)
+    apply_names(e, result)
   end)
 end
 
@@ -547,6 +622,40 @@ local function table_for(ctx, qualifier)
   end
 end
 
+--- The case keywords are written in: the typed prefix when it is upper case (two letters or more), else the case of
+--- the statement's first word, else lower; `completion.keyword_case` can force one.
+local function keyword_case(statement, partial)
+  if deps.keyword_case == 'upper' or deps.keyword_case == 'lower' then
+    return deps.keyword_case
+  end
+  if #partial >= 2 and partial:match('%a') and partial == partial:upper() then
+    return 'upper'
+  end
+  local first = statement:match('[%a_]+')
+  if first and #first >= 2 and first == first:upper() then
+    return 'upper'
+  end
+  return 'lower'
+end
+
+--- Keywords for a position where an expression or a clause can follow (or a statement can begin).
+local function keyword_items(ctx, engine, statement)
+  if not deps.keywords then
+    return {}
+  end
+  local set = keywords[engine == 'sqlserver' and 'sqlserver' or 'postgres']
+  local words = ctx.at_start and set.start or set.inside
+  local upper = keyword_case(statement, ctx.partial) == 'upper'
+  local items = {}
+  for _, w in ipairs(words) do
+    if matches(w, ctx.partial) then
+      local text = upper and w:upper() or w
+      items[#items + 1] = { label = w, insert = text, kind = 'keyword', detail = 'keyword' }
+    end
+  end
+  return items
+end
+
 --- Works out what to offer and calls `cb({ items, start, kind })` when it is known: at once when the cache has it,
 --- otherwise when the load that this call starts ends. Never blocks.
 ---@param args { conn: { id: string, engine: string? }, before: string, statement: string? }
@@ -592,10 +701,11 @@ function M.complete(args, cb)
       done()
     end)
   end
-  -- columns of the statement's tables
-  local tables = ctx.tables
+  -- columns of the statement's tables, then keywords
+  local statement = args.statement or args.before
+  local tables = ctx.at_start and {} or ctx.tables
   if #tables == 0 then
-    return done()
+    return done(keyword_items(ctx, engine, statement))
   end
   local items, pending = {}, #tables
   local per = {}
@@ -607,6 +717,7 @@ function M.complete(args, cb)
         for _, list in ipairs(per) do
           vim.list_extend(items, list)
         end
+        vim.list_extend(items, keyword_items(ctx, engine, statement))
         done(items)
       end
     end)

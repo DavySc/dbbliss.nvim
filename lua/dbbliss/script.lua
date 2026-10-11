@@ -8,6 +8,7 @@ local M = {}
 ---@field start { line: integer, col: integer }
 ---@field end { line: integer, col: integer }  exclusive
 ---@field repeat integer  GO count, 1 otherwise
+---@field ddl boolean?  the statement creates, alters or drops an object
 
 --- The statement under the cursor: the last one that starts at or before it, so a cursor on a blank
 --- line or a trailing comment picks the statement above, and one above the first picks the first.
@@ -32,6 +33,7 @@ end
 ---@field line_offset integer  0-based buffer line the text starts on
 ---@field index integer  position of its statement among those chosen
 ---@field count integer  how many statements were chosen
+---@field ddl boolean  the statement changes the schema
 
 --- The queue to run, in order, with each statement repeated by its GO count.
 ---@param statements dbbliss.Statement[]
@@ -41,7 +43,7 @@ function M.expand(statements, base_line)
   local queue = {}
   for i, s in ipairs(statements) do
     for _ = 1, s['repeat'] or 1 do
-      queue[#queue + 1] = { text = s.text, line_offset = base_line + s.start.line, index = i, count = #statements }
+      queue[#queue + 1] = { text = s.text, line_offset = base_line + s.start.line, index = i, count = #statements, ddl = s.ddl == true }
     end
   end
   return queue

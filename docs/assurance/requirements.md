@@ -524,12 +524,49 @@ inserted quoted for the engine. Source: phase 5 plan; decision 65.
 ### LLR-COMP-4
 Completion shall never wait for the server: it answers from the per-connection cache, starts a load
 when the cache has no answer yet, and offers the items when the load ends. The cache is dropped on
-disconnect and when the schema tree is refreshed. Source: priorities (nonblocking UI); decision 65.
+disconnect; a refresh of the schema tree reloads it (LLR-COMP-11). Source: priorities (nonblocking
+UI); decision 65.
 
 ### LLR-COMP-5
 The blink.cmp and nvim-cmp adapters shall be thin: they call the core, need neither plugin to be
 installed, and a request outside an SQL buffer with a connection answers nothing. Source: phase 5
 plan; decision 66.
+
+### HLR-COMP-6
+Completion shall also offer SQL keywords of the connection's dialect (PostgreSQL, SQL Server): the
+opening keywords of a statement where a statement can begin, and clause and expression keywords
+elsewhere in a statement, but none after `qualifier.`, in a position where only an object name can
+stand (after FROM, JOIN, UPDATE, INTO and the like), or inside a string or comment. Keywords rank
+after names and columns. Source: user request, 2026-10-11; decision 68.
+
+### LLR-COMP-7
+A keyword shall be inserted in the case the statement is written in: upper case when the statement's
+first word is upper case or the typed prefix is (two letters or more), lower case otherwise; the
+`completion.keyword_case` option can force `upper` or `lower`. Source: user request; decision 68.
+
+### HLR-COMP-8
+When a statement that changes the schema completes (CREATE, ALTER, DROP, SELECT ... INTO, sp_rename)
+the connection's completion cache shall be reloaded without the user asking: at once under
+autocommit, and when the transaction ends (commit or rollback) otherwise, because the catalog session
+cannot see uncommitted schema changes. Source: user request, 2026-10-11; decision 69.
+
+### LLR-COMP-9
+`script/split` shall mark each statement with `ddl`: true when the statement's words say it creates,
+alters or drops an object, creates a table with SELECT ... INTO, or renames one with sp_rename. It
+shall err toward true. Source: user request; decision 69. Method: T (protocol suite).
+
+### LLR-COMP-10
+A reload shall be stale-while-revalidate: the old names and columns keep being offered while the reload
+runs; a successful reload replaces them; a failed reload keeps them, leaves them stale and is not
+retried for 10 s; a schema change that completes while a reload runs makes that reload's result stale
+(it is used, and another reload follows). Source: priorities (nonblocking UI); decision 69.
+
+### LLR-COMP-11
+A refresh of the schema tree shall reload the connection's completion names (not drop them). Names
+older than `completion.max_age_s` (default 300; 0 turns it off) shall be reloaded in the background at
+the next request, and never while a transaction is open on the connection (the catalog session could
+wait for its locks). Columns are reloaded lazily when asked for after the connection's schema changed.
+Source: user request; decision 69.
 
 ## Client interface
 

@@ -296,6 +296,7 @@ public sealed class Backend
                 ["end"] = new JsonObject { ["line"] = unit.End.Line, ["col"] = unit.End.Column },
                 ["repeat"] = unit.Repeat,
                 ["kind"] = StatementClassifier.Classify(unit.Text, engine.Dialect) == StatementKind.Read ? "read" : "write",
+                ["ddl"] = StatementClassifier.ChangesSchema(unit.Text, engine.Dialect),
             });
         }
         return new JsonObject { ["statements"] = statements };
