@@ -548,6 +548,88 @@ local steps = {
     end,
   },
   {
+    -- Verifies: HLR-COMP-8, LLR-COMP-12
+    'completion_waits_for_the_transaction_to_end',
+    function()
+      local completion = require('dbbliss.completion')
+      local t = 'e2e_comp_tx'
+      local q = pg and t or ('dbo.' .. t)
+      local function sql(statement)
+        buffer({ statement })
+        dbbliss.run('buffer')
+        wait('the statement', idle)
+      end
+      local function offered()
+        local b = buffer({ 'select * from ' })
+        local got
+        completion.for_buffer(b, 1, #'select * from ', function(r)
+          got = r
+        end)
+        wait('completion', function()
+          return got ~= nil
+        end, 5000)
+        for _, item in ipairs(got.items) do
+          if item.label == t then
+            return true
+          end
+        end
+        return false
+      end
+      local function tx(state_wanted)
+        wait('the transaction state ' .. state_wanted, function()
+          return dbbliss._state.connections.db.transaction == state_wanted
+        end)
+      end
+      local requests = { names = 0 }
+      local original = dbbliss._catalog_request
+      dbbliss._catalog_request = function(conn_id, method, params, cb)
+        if method == 'catalog/names' then
+          requests.names = requests.names + 1
+        end
+        return original(conn_id, method, params, cb)
+      end
+      local drop = pg and ('drop table if exists ' .. t) or ("if object_id('dbo." .. t .. "') is not null drop table dbo." .. t)
+      sql(drop)
+      local ok, err = pcall(function()
+        expect(not offered(), 'the table is not there yet (this loads the names)')
+        -- An open transaction with DDL: nothing may be asked of the catalog session (on SQL Server it would wait for
+        -- the DDL's locks), not a reload and not a first load, and the answer must come at once.
+        for _, round in ipairs({ 'first load', 'reload' }) do
+          if round == 'first load' then
+            completion.reset()
+          end
+          dbbliss.begin()
+          tx('active')
+          sql('create table ' .. q .. ' (id int)')
+          local before = requests.names
+          local started = vim.uv.hrtime()
+          expect(not offered(), 'the uncommitted table is not offered (' .. round .. ')')
+          expect((vim.uv.hrtime() - started) / 1e9 < 3, 'completion answered at once (' .. round .. ')')
+          vim.wait(300)
+          expect(requests.names == before, 'no catalog request while the transaction is open (' .. round .. ')')
+          dbbliss.rollback()
+          tx('none')
+          wait('completion after the rollback', function()
+            return not offered()
+          end)
+          expect(requests.names > before, 'the names are loaded once the transaction has ended (' .. round .. ')')
+        end
+        -- Committed, the table appears without a refresh.
+        dbbliss.begin()
+        tx('active')
+        sql('create table ' .. q .. ' (id int)')
+        dbbliss.commit()
+        tx('none')
+        wait('the committed table in completion', offered, 15000)
+      end)
+      dbbliss._catalog_request = original
+      sql(drop)
+      if not ok then
+        error(err, 0)
+      end
+    end,
+  },
+  {
     -- Verifies: none (fixture removal)
     'catalog_cleanup',
     function()

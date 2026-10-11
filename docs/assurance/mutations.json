@@ -729,6 +729,42 @@
         "sessions_sqlserver_status_of_a_session_that_ended_meanwhile"
       ],
       "verifies": "HLR-ADM-8"
+    },
+    {
+      "id": "TX-1",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a first load is sent while a transaction with DDL is open",
+      "find": "  if deps.catalog_blocked(conn.id) then",
+      "replace": "  if false then",
+      "tests": [
+        "completion_sends_no_first_load_while_a_transaction_with_ddl_is_open"
+      ],
+      "verifies": "LLR-COMP-12"
+    },
+    {
+      "id": "TX-2",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "a schema change inside a transaction is not remembered as blocking catalog requests",
+      "find": "conn.ddl_in_tx = conn.transaction ~= 'none'",
+      "replace": "conn.ddl_in_tx = false",
+      "tests": [
+        "completion_asks_for_nothing_while_this_clients_ddl_transaction_is_open"
+      ],
+      "verifies": "LLR-COMP-12"
+    },
+    {
+      "id": "TX-3",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the connection tells completion nothing is blocked",
+      "find": "return c ~= nil and c.ddl_in_tx == true and c.transaction ~= 'none'",
+      "replace": "return false",
+      "tests": [
+        "completion_asks_for_nothing_while_this_clients_ddl_transaction_is_open"
+      ],
+      "verifies": "LLR-COMP-12"
     }
   ]
 }

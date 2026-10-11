@@ -49,6 +49,9 @@ local function fake(opts)
     transaction_idle = function()
       return f.idle
     end,
+    catalog_blocked = function()
+      return f.blocked == true
+    end,
     max_age_s = opts.max_age_s or 0,
     keywords = opts.keywords ~= false,
     keyword_case = opts.keyword_case or 'match',
@@ -521,6 +524,30 @@ local tests = {
       f.answer('catalog/names')
       completion.transaction_ended('c1')
       eq(f.count('catalog/names'), 2, 'and not again when nothing changed')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-12
+    'completion_sends_no_first_load_while_a_transaction_with_ddl_is_open',
+    function()
+      local f = fake()
+      f.blocked = true
+      local got
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function(r)
+        got = r
+      end)
+      expect(got ~= nil and #got.items == 0, 'answered at once, without names')
+      eq(f.count('catalog/names'), 0, 'no request: the catalog session would wait for the locks of the open DDL')
+      local cols
+      completion.complete({ conn = conn(), before = 'select ', statement = 'select  from orders o' }, function(r)
+        cols = r
+      end)
+      expect(cols ~= nil, 'columns are answered at once too')
+      eq(f.count('catalog/columns'), 0, 'and not asked for')
+      expect(#cols.items > 0 and cols.items[1].kind == 'keyword', 'keywords still come: they need no server')
+      f.blocked = false
+      completion.complete({ conn = conn(), before = 'select * from ', statement = 'select * from ' }, function() end)
+      eq(f.count('catalog/names'), 1, 'the next request after the transaction loads')
     end,
   },
   {

@@ -43,6 +43,25 @@ design variants, as in `QueryLifecycle.tla`.
 
 Not modelled: a *killed* backend (nothing ties `pg_dump` to its parent; `docs/phase4-decisions.md`, 55).
 
+## `tla/CompletionCache.tla`: the completion cache next to DDL and transactions
+
+The follow-up to Phase 5 (decision 69). One connection's completion cache against a user who runs DDL under
+autocommit or inside a transaction. The catalog session is a second session: it sees only committed schema changes,
+and on SQL Server a catalog read waits for another session's uncommitted DDL locks (measured; the scenario
+`completion_and_uncommitted_ddl` keeps that true). `gen` counts schema changes the client saw complete; an answer
+is marked with the `gen` it was *asked* at. Boolean constants select design variants.
+
+| Config | Design | Result |
+|---|---|---|
+| `CC_Proposed.cfg` | the current code | `NoBlockedRequest`, `NeverFalselyFresh`; every stale cache is reloaded (`StaleReloads`) |
+| `CC_ReloadInTx.cfg` | a reload may be sent while a transaction is open | `NoBlockedRequest` |
+| `CC_FirstLoadInTx.cfg` | the first load may be sent while a transaction with DDL is open | `NoBlockedRequest` |
+| `CC_ForgetGeneration.cfg` | an answer marks the cache with the *current* gen, not the one it was asked at | `NeverFalselyFresh` |
+| `CC_NoRetryAfterTx.cfg` | a DDL inside a transaction is not remembered, so nothing reloads after the commit | `StaleReloads` (liveness) |
+
+Not modelled: the age-based reload (`max_age_s`; it is the same reload, started by time instead of by DDL, under the same
+"never while a transaction is open" rule), and time (a failed reload's 10 s back-off).
+
 ## `quint/client.qnt`: Lua client, connection lease, transactions
 
 The user (connect, exec, cancel, begin/commit/rollback, disconnect), the Lua client's state and

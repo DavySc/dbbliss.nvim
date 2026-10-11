@@ -60,6 +60,8 @@ public sealed partial class Scenarios(EngineProfile profile, Settings settings)
             yield return ("plan_cancel_and_shutdown", PlanCancelAndShutdown);
             // Verifies: HLR-COMP-1
             yield return ("completion_names_and_columns", CompletionNamesAndColumns);
+            // Verifies: HLR-COMP-8, LLR-COMP-12
+            yield return ("completion_and_uncommitted_ddl", CompletionAndUncommittedDdl);
         }
         // Verifies: HLR-SCRIPT-3
         yield return ("error_line_in_buffer", ErrorLineInBuffer);

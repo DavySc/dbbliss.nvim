@@ -176,6 +176,10 @@ function M.setup(opts)
     connection_for = function(bufnr)
       return M._completion_connection(bufnr)
     end,
+    catalog_blocked = function(conn_id)
+      local _, c = connection_by_id(conn_id)
+      return c ~= nil and c.ddl_in_tx == true and c.transaction ~= 'none'
+    end,
     transaction_idle = function(conn_id)
       local _, c = connection_by_id(conn_id)
       return c == nil or (c.transaction == 'none' and (c.tx_calls or 0) == 0)
@@ -662,6 +666,9 @@ function M._schema_changed(name)
     return
   end
   conn.schema_dirty = true
+  -- Inside a transaction the change is uncommitted: the catalog session cannot see it, and on SQL Server would wait
+  -- for its locks, so completion sends no catalog request until the transaction has ended.
+  conn.ddl_in_tx = conn.transaction ~= 'none'
   completion.refresh(conn.id)
   if conn.transaction == 'none' then
     flush_schema(name, conn)
@@ -674,6 +681,7 @@ function M._transaction_ended(name)
   if not conn then
     return
   end
+  conn.ddl_in_tx = false
   completion.transaction_ended(conn.id)
   flush_schema(name, conn)
 end

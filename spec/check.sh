@@ -62,6 +62,14 @@ tlc Ops_StaleBackupCounts 'Invariant ProdDropBacked is violated' Operations
 tlc Ops_PlanAutocommit 'Invariant PlanNeverCommits is violated' Operations
 tlc Ops_PlanNoConfirm 'Invariant NoUnconfirmedWritePlan is violated' Operations
 
+# Verifies: HLR-COMP-8, LLR-COMP-10, LLR-COMP-12 (CC_Proposed); each other variant must fail
+echo "TLA+: spec/tla/CompletionCache.tla"
+tlc CC_Proposed pass CompletionCache
+tlc CC_ReloadInTx 'Invariant NoBlockedRequest is violated' CompletionCache
+tlc CC_FirstLoadInTx 'Invariant NoBlockedRequest is violated' CompletionCache
+tlc CC_ForgetGeneration 'Invariant NeverFalselyFresh is violated' CompletionCache
+tlc CC_NoRetryAfterTx 'Temporal propert(y|ies).*(violated|is violated|were violated)' CompletionCache
+
 # Verifies: HLR-TX-1, HLR-TX-2, HLR-TX-5 (NoSilentRollback, HonestTxView), HLR-CONC-3 (NoOrphanSession), LLR-CONC-2 (LeaseBeforeWrite must fail)
 echo "Quint: spec/quint/client.qnt"
 if (cd "$root/quint" && quint typecheck client.qnt >/dev/null && quint typecheck client_quit.qnt >/dev/null); then ok "typecheck"; else bad "typecheck"; fi

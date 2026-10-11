@@ -66,4 +66,50 @@ public sealed partial class Scenarios
         }
         return Result("completion_names_and_columns", ok() ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
     }
+
+    /// <summary>
+    /// Why completion waits for a transaction to end (CompletionCache.tla): the catalog session is another session. PostgreSQL
+    /// does not show it a table another session created in an open transaction; SQL Server makes its catalog read WAIT for that
+    /// transaction's locks. Both then show the table once it is committed. If SQL Server stops waiting one day, this fails and
+    /// the rule can be reconsidered.
+    /// </summary>
+    private async Task<ScenarioResult> CompletionAndUncommittedDdl()
+    {
+        var (steps, step, ok) = Steps();
+        await using var observer = await profile.OpenObserverAsync();
+        await profile.CreateScratchAsync(observer, Scratch, 10);
+        try
+        {
+            var (c, conn, _) = await StartAsync(connectionString: profile.ScratchConnectionString(Scratch));
+            await using var _c = c;
+            await using var user = await profile.OpenObserverAsync(Scratch);
+            const string table = "completion_uncommitted_probe";
+            JsonObject Names() => new() { ["connection_id"] = conn };
+            bool Lists(JsonNode r) => r["names"]!.AsArray().Any(n => n!["name"]!.GetValue<string>() == table);
+
+            await profile.ExecAsync(user, profile.TypedBeginSql);
+            await profile.ExecAsync(user, "CREATE TABLE " + table + " (id int)");
+            var request = c.RequestAsync("catalog/names", Names());
+            var finished = await Task.WhenAny(request, Task.Delay(2500)) == request;
+            if (profile.Engine == "postgres")
+            {
+                step("PostgreSQL answers at once", finished);
+                step("and does not show the uncommitted table", finished && !Lists(await request));
+            }
+            else
+            {
+                step("SQL Server's catalog read waits for the uncommitted CREATE TABLE", !finished);
+            }
+            await profile.ExecAsync(user, "COMMIT");
+            var after = await request;
+            if (profile.Engine == "postgres") after = await c.RequestAsync("catalog/names", Names());
+            step("once it is committed the table is listed", Lists(after));
+            await profile.ExecAsync(user, "DROP TABLE " + table);
+        }
+        finally
+        {
+            await profile.DropScratchAsync(observer, Scratch);
+        }
+        return Result("completion_and_uncommitted_ddl", ok() ? Outcome.Pass : Outcome.Fail, string.Join("; ", steps));
+    }
 }

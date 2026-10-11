@@ -218,7 +218,8 @@ the first request starts the load.
 
 **Keeping the cache current.** A statement that creates, alters or drops an object (`CREATE`, `ALTER`, `DROP`,
 `SELECT ... INTO`, `sp_rename`) reloads the names, and the schema tree if it is shown, as soon as it completes. In a
-transaction the reload waits for the commit or rollback: the catalog session cannot see uncommitted changes.
+transaction nothing is asked of the catalog session until the commit or rollback: it cannot see uncommitted changes, and on SQL Server its
+read would wait for their locks (so a table created in an open transaction is not offered until the transaction ends).
 The old names keep being offered while the reload runs, and a failed reload keeps them. Columns are reloaded
 when next asked for. Names older than `completion.max_age_s` (default 5 minutes) are reloaded in the background,
 which also catches changes made by others. Refreshing the tree (`R`) reloads too. DDL inside a `DO` block, a

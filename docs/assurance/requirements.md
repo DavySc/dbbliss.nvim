@@ -547,13 +547,25 @@ first word is upper case or the typed prefix is (two letters or more), lower cas
 ### HLR-COMP-8
 When a statement that changes the schema completes (CREATE, ALTER, DROP, SELECT ... INTO, sp_rename)
 the connection's completion cache shall be reloaded without the user asking: at once under
-autocommit, and when the transaction ends (commit or rollback) otherwise, because the catalog session
-cannot see uncommitted schema changes. Source: user request, 2026-10-11; decision 69.
+autocommit, and when the transaction ends (commit or rollback) otherwise. A reload shall wait for the
+transaction to end because the catalog session cannot see uncommitted schema changes (PostgreSQL) and
+waits for their locks (SQL Server: a catalog read blocks on another session's uncommitted CREATE TABLE,
+holding the connection's catalog lock up to the 30 s catalog timeout). Verified by the model
+`CompletionCache.tla` (`NoBlockedRequest`, `NeverFalselyFresh`, `StaleReloads`) and by a scenario that
+shows both engines' behaviour with uncommitted DDL. Source: user request, 2026-10-11 ("waiting for a
+transaction to end is correct behaviour"); decision 69.
 
 ### LLR-COMP-9
 `script/split` shall mark each statement with `ddl`: true when the statement's words say it creates,
 alters or drops an object, creates a table with SELECT ... INTO, or renames one with sp_rename. It
 shall err toward true. Source: user request; decision 69. Method: T (protocol suite).
+
+### LLR-COMP-12
+No catalog request for completion shall be sent while a transaction in which this client saw a schema
+change complete is open on the connection: not a reload, and not the first load (a request for completion
+is then answered without names, and the names load once the transaction has ended). Reloads are not sent
+while any transaction is open. Source: user request, 2026-10-11; decision 69. Verified by the model
+(`FirstLoadSkipsDdlTx`, `ReloadWaitsForTx`) and tests.
 
 ### LLR-COMP-10
 A reload shall be stale-while-revalidate: the old names and columns keep being offered while the reload

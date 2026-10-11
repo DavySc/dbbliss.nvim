@@ -83,6 +83,7 @@ local function reset()
   stub.confirms = 0
   stub.confirm_answer = nil
   next_connection = 0
+  require('dbbliss.completion').reset()
 end
 
 --- NoOrphanSession: every connection the backend has open is one the client knows about.
@@ -671,6 +672,30 @@ local tests = {
       expect(take('catalog/children') ~= nil, 'the tree is reloaded when the transaction ends')
       tree._state.trees['c1'] = nil
       tree._state.current = nil
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-12
+    'completion_asks_for_nothing_while_this_clients_ddl_transaction_is_open',
+    '',
+    function()
+      script_setup({ 'create table t (id int);', 'select 1;' })
+      local completion = require('dbbliss.completion')
+      dbbliss.run('buffer')
+      local ddl = stmt('create table t (id int);', 0)
+      ddl.ddl = true
+      take('script/split').cb(nil, { statements = { ddl, stmt('select 1;', 1) } })
+      finish_query({ transaction = 'active' })
+      dbbliss._state.connections.a.transaction = 'active'
+      local got
+      completion.complete({ conn = { id = 'c1', engine = 'postgres' }, before = 'select * from ', statement = 'select * from ' }, function(r)
+        got = r
+      end)
+      expect(got ~= nil, 'answered at once')
+      expect(take('catalog/names') == nil, 'no catalog request while the transaction that changed the schema is open')
+      finish_query({ transaction = 'none' })
+      completion.complete({ conn = { id = 'c1', engine = 'postgres' }, before = 'select * from ', statement = 'select * from ' }, function() end)
+      expect(take('catalog/names') ~= nil, 'after the transaction ended the names load')
     end,
   },
   {

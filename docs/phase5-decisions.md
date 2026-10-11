@@ -153,7 +153,44 @@ forces one.
 sees completion follow each without a refresh. The SQL Server end-to-end tree step no longer expands other
 databases' `dbo` (a local artefact of a second database), so that suite now passes locally too.
 
-**Not checked (follow-up):** the lock wait of a reload on SQL Server against another session's uncommitted DDL (the
+**71. `max_age_s = 300` stays, on measurement.** The question was what a background reload costs, since that is what
+could argue for a longer (or shorter) interval. Measured through the real plugin and backend against 20 000 tables (the
+cap of `catalog/names`) on PostgreSQL 17 and SQL Server 2022 in Docker, same machine
+(`scripts/perf/completion_reload.lua`, not run by CI):
+
+| | 5 000 names | 20 000 names (the cap) |
+|---|---|---|
+| PostgreSQL, reload round trip (median, range) | 33 ms | 218 ms (130–284) |
+| SQL Server, reload round trip (median, range) | 73 ms | 236 ms (190–329) |
+| JSON that crosses the pipe | ~240 KB | ~1 MB |
+| Neovim main thread per reload (JSON decode) | | 12–15 ms |
+| One table's columns | | ~3 ms |
+| A completion over the cached 20 000 names (per keystroke) | | ~10 ms |
+
+At 300 s a reload costs at most 0.1% of one catalog session and ~15 ms of editor time per 5 minutes, only when you ask for
+completion after the names expired (an idle editor costs nothing). At 60 s it would be 0.4%, at 10 s 2.5% and a 15 ms
+stall every 10 s that starts to overlap typing. So the costs do not bind the choice anywhere above about 10 s; the number is
+a judgement about how late someone else's DDL may show up, and 5 minutes is a defensible one for that. Considered and not
+done: a cheap change fingerprint to poll instead (SQL Server could use `count(*)` and `max(modify_date)` of `sys.objects`;
+PostgreSQL has no equivalent that sees ALTER and DROP), which would allow a short interval at almost no cost but adds an
+engine-specific mechanism for at most a 0.1% saving. The per-keystroke 10 ms at the cap is the one number worth
+watching; a pre-lowercased name index would cut it, and is not needed yet.
+
+**72. Waiting for the transaction is specified, modelled and tested** (user: "correct behaviour"). Measured first: SQL
+Server's catalog read *blocks* on another session's uncommitted `CREATE TABLE` (a lock timeout in `sqlcmd`, and the backend
+would sit in it up to the 30 s catalog timeout holding the connection's catalog lock, which stalls the tree and `describe` too);
+PostgreSQL just does not see it. So the rule is stronger than "reload after commit": **no catalog request for completion at
+all while a transaction in which this client saw a schema change is open**, first loads included (`LLR-COMP-12`; a first request
+in that state is answered with keywords only). Reloads wait for any open transaction. Evidence: `spec/tla/CompletionCache.tla`
+(`NoBlockedRequest`, `NeverFalselyFresh`, liveness `StaleReloads`; four variants that must fail: reload in a transaction,
+first load in a transaction, an answer stamped with the current instead of the asked-at generation, no reload after the
+transaction), the cancel-suite scenario `completion_and_uncommitted_ddl` (both engines' behaviour, so the day SQL Server stops
+waiting the test says so), the end-to-end step `completion_waits_for_the_transaction_to_end` (first load and reload, rollback and
+commit; it fails with the rule removed: it timed out on SQL Server), and unit tests with recorded mutations. Limits: a
+transaction that was opened *by another client* or whose DDL this client did not see complete (inside a `DO` block, a function, a
+procedure) can still make a catalog read wait; the 30 s timeout then surfaces as a catalog error, as it always did.
+
+**Not checked (follow-up):** a transaction opened by another client making a catalog read wait (72); the SQL Server numbers on a loaded production server (71 is one Docker host); the lock wait of a reload on SQL Server against another session's uncommitted DDL (the
 tests use the rule "not while this connection has a transaction open", which does not cover another connection's);
 the background reload's load on a very large catalog every 5 minutes (20 000 names; unmeasured); keyword lists against
 the engines' current grammar (written from memory); behaviour when the machine sleeps and `max_age_s` has long

@@ -13,7 +13,7 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 `PlanTests.cs`, `PlannerTests.cs`, `CompletionTests.cs`, `PlanScenarios.cs`, `CompletionScenarios.cs`,
 `tests/nvim/plan_test.lua`, `tests/nvim/completion_test.lua`. The blink.cmp / nvim-cmp adapters are
 tested against the documented contract only (neither plugin is installed). The phase began with a harness
-inspection (decision 67, PR-024, PR-025); a follow-up added keyword completion and reload-after-DDL (decisions 68–70): mutation checks are now recorded in
+inspection (decision 67, PR-024, PR-025); a follow-up added keyword completion and reload-after-DDL (decisions 68–72; the cache rules are modelled in `spec/tla/CompletionCache.tla`): mutation checks are now recorded in
 `docs/assurance/mutations.json` and replayed by `scripts/assurance/mutate.py` (CI job `mutation`).
 
 **Phase 4 (backup, drop, progress window) is complete and on `main`.** Decisions:

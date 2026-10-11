@@ -20,6 +20,11 @@ local deps = {
   connection_for = function()
     return nil
   end,
+  --- True while a transaction in which this client saw a schema change complete is open on the connection: a catalog
+  --- request would wait for its locks (SQL Server), so none is sent at all, not even a first load.
+  catalog_blocked = function()
+    return false
+  end,
   --- True when no transaction is open on the connection: only then is a reload worth doing (the catalog
   --- session cannot see uncommitted changes, and could wait for their locks).
   transaction_idle = function()
@@ -488,6 +493,9 @@ local function with_entry(conn, slot, key, method, params, apply, cb)
   if entry and entry.state == 'loading' then
     entry.waiters[#entry.waiters + 1] = cb
     return
+  end
+  if deps.catalog_blocked(conn.id) then
+    return cb(nil) -- nothing is cached and asking would wait: answer without; the next request after the transaction loads
   end
   load(conn, cache, slot, key, method, params, apply)
   slot[key].waiters[1] = cb
