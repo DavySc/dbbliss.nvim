@@ -159,7 +159,7 @@
   "lines": 75.49
  },
  "lua/dbbliss/completion.lua": {
-  "lines": 93.39
+  "lines": 95.67
  },
  "lua/dbbliss/completion/blink.lua": {
   "lines": 100.0
@@ -174,7 +174,10 @@
   "lines": 97.44
  },
  "lua/dbbliss/init.lua": {
-  "lines": 84.6
+  "lines": 85.35
+ },
+ "lua/dbbliss/keywords.lua": {
+  "lines": 100.0
  },
  "lua/dbbliss/management.lua": {
   "lines": 94.09
@@ -198,6 +201,6 @@
   "lines": 97.35
  },
  "lua/dbbliss/tree.lua": {
-  "lines": 94.74
+  "lines": 95.58
  }
 }
