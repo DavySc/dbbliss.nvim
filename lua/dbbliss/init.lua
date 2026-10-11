@@ -10,6 +10,7 @@ local sessions = require('dbbliss.sessions')
 local management = require('dbbliss.management')
 local plan = require('dbbliss.plan')
 local completion = require('dbbliss.completion')
+local ai = require('dbbliss.ai')
 
 local M = {}
 
@@ -22,6 +23,7 @@ local TRANSACTION_OPEN = 1003
 ---@field password? { env: string }|{ credman: string }|{ pass: string }|{ libsecret: table<string,string> }  where to find the password, never the password; leave out for integrated auth
 ---@field env? 'dev'|'test'|'prod'
 ---@field options? table
+---@field ai? true|{ prod: boolean }  opt in to `:Dbbliss ask` (prod and untagged connections also need { prod = true })
 
 ---@class dbbliss.Config
 ---@field connections table<string, dbbliss.ConnectionConfig>
@@ -40,6 +42,7 @@ local defaults = {
   info = { max_col_width = 200 },
   tree = { show_system = false },
   completion = { keywords = true, keyword_case = 'match', max_age_s = 300 },
+  ai = {}, -- see dbbliss.ai: command, timeout_ms, max_bytes, max_tables, confirm, preamble
   mappings = { info = '<M-F1>' },
 }
 
@@ -157,6 +160,13 @@ function M.setup(opts)
     notify = notify,
   })
   management.setup({
+    request = function(conn_id, method, params, cb)
+      M._catalog_request(conn_id, method, params, cb)
+    end,
+    notify = notify,
+  })
+  ai.configure(state.config.ai)
+  ai.setup({
     request = function(conn_id, method, params, cb)
       M._catalog_request(conn_id, method, params, cb)
     end,
@@ -305,6 +315,10 @@ local function register_handlers(b)
       local line = (e.buffer_line and e.buffer_line ~= vim.NIL) and e.buffer_line or e.line
       local where = (line and line ~= vim.NIL) and (' (line %s)'):format(line) or ''
       results.note({ '-- error' .. where .. ': ' .. tostring(e.message) }, 'DbblissError')
+      local econn = q and select(2, connection_by_id(q.connection_id))
+      if econn and q.sql then
+        econn.last_error = { sql = q.sql, message = tostring(e.message), line = line }
+      end
       if p.status == 'error' then
         notify(tostring(e.message), vim.log.levels.ERROR)
       end
@@ -439,6 +453,7 @@ function M.execute(sql, opts)
   state.queries[query_id] = {
     connection = name,
     connection_id = conn.id,
+    sql = sql,
     status = 'running',
     rows = 0,
     result_sets = 0,
@@ -698,6 +713,38 @@ function M._completion_connection(bufnr)
   return { id = conn.id, engine = conn.engine }
 end
 
+--- Asks the configured AI command about the statement under the cursor (or the one in the range): the statement, the
+--- definitions of the tables it names, and its last plan and error go to the command, after the user has seen and
+--- agreed to exactly what is sent (see dbbliss.ai). Executes nothing.
+---@param question string?  asked for when empty
+---@param scope 'statement'|'range'?
+---@param range { [1]: integer, [2]: integer }?
+function M.ask(question, scope, range)
+  with_statements(scope or 'statement', range, function(name, conn_id, _, statements)
+    state.scripts[conn_id] = nil
+    if #statements ~= 1 then
+      notify(('ask takes one statement, got %d; put the cursor in one or select just it'):format(#statements), vim.log.levels.ERROR)
+      return
+    end
+    local q = question
+    if not q or vim.trim(q) == '' then
+      q = vim.fn.input('Ask about this statement: ')
+    end
+    if not q or vim.trim(q) == '' then
+      return
+    end
+    local conn = state.connections[name]
+    local cfg = state.config.connections[name] or {}
+    ai.ask({
+      conn = { id = conn_id, name = name, engine = conn.engine, env = cfg.env, ai = cfg.ai },
+      question = vim.trim(q),
+      statement = statements[1].text,
+      last_error = conn.last_error,
+      last_plan = plan._state.last[conn_id],
+    })
+  end, { skip_confirm = true })
+end
+
 --- Plans the statement under the cursor (or a range holding one statement) on a session of the
 --- backend's own and shows the plan. An actual plan runs the statement and rolls it back: the plan
 --- module asks first unless the statement is plainly a read.
@@ -895,6 +942,7 @@ end
 
 --- VimLeavePre: let the backend cancel queries and close connections before Neovim exits.
 function M.on_exit()
+  ai.stop()
   local b = state.backend
   if b and not b.exited then
     if not b:shutdown_sync(state.config.backend.shutdown_timeout_ms) then
@@ -1265,6 +1313,10 @@ local subcommands = {
       return
     end
     M.plan(mode, range and 'range' or 'statement', range)
+  end,
+  -- Asks the configured AI command about the statement (opt-in per connection; shows what it will send first).
+  ask = function(args, range)
+    M.ask(table.concat(args, ' '), range and 'range' or 'statement', range)
   end,
   -- The schema browser.
   tree = function()

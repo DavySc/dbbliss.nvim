@@ -155,11 +155,14 @@
   "branches": 100.0,
   "lines": 100.0
  },
+ "lua/dbbliss/ai.lua": {
+  "lines": 93.04
+ },
  "lua/dbbliss/backend.lua": {
   "lines": 75.49
  },
  "lua/dbbliss/completion.lua": {
-  "lines": 95.67
+  "lines": 95.47
  },
  "lua/dbbliss/completion/blink.lua": {
   "lines": 100.0
@@ -174,7 +177,7 @@
   "lines": 97.44
  },
  "lua/dbbliss/init.lua": {
-  "lines": 85.35
+  "lines": 86.4
  },
  "lua/dbbliss/keywords.lua": {
   "lines": 100.0
@@ -186,7 +189,7 @@
   "lines": 97.06
  },
  "lua/dbbliss/plan.lua": {
-  "lines": 97.2
+  "lines": 97.24
  },
  "lua/dbbliss/render.lua": {
   "lines": 97.4

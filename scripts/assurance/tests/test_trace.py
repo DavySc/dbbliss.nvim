@@ -32,9 +32,9 @@ PROTOCOL = """var tests = new (string Name, string Bug, Func<Task> Run)[]
 """
 LUA = "local names = {\n  'lua_one',\n}\n"
 LUA_TAGGED = "local names = {\n  -- Verifies: HLR-A-1\n  'lua_one',\n}\n"
-CI = "\n".join(f"nvim -l tests/nvim/{n}_test.lua" for n in ("client", "results", "catalog", "sessions", "management", "plan", "completion") for _ in range(2))
+CI = "\n".join(f"nvim -l tests/nvim/{n}_test.lua" for n in ("client", "results", "catalog", "sessions", "management", "plan", "completion", "ai") for _ in range(2))
 CI += "\nnvim -l tests/nvim/e2e_test.lua\nnvim -l tests/nvim/e2e_test.lua\n"
-COV = "\n".join(f"run tests/nvim/{n}_test.lua" for n in ("client", "results", "catalog", "sessions", "management", "plan", "completion", "e2e")) + "\n"
+COV = "\n".join(f"run tests/nvim/{n}_test.lua" for n in ("client", "results", "catalog", "sessions", "management", "plan", "completion", "ai", "e2e")) + "\n"
 
 
 class Repo:
@@ -44,7 +44,7 @@ class Repo:
         self.write("docs/assurance/requirements.md", REQS)
         self.write("backend/tests/Dbbliss.ProtocolTests/Program.cs", PROTOCOL)
         self.write("backend/tests/Dbbliss.CancelTests/Scenarios.cs", "")
-        for n in ("client", "results", "catalog", "sessions", "management", "plan", "completion", "e2e"):
+        for n in ("client", "results", "catalog", "sessions", "management", "plan", "completion", "ai", "e2e"):
             self.write(f"tests/nvim/{n}_test.lua", "")
         self.write("tests/nvim/client_test.lua", LUA_TAGGED)
         self.write(".github/workflows/ci.yml", CI)

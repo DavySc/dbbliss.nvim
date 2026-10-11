@@ -26,6 +26,7 @@ local deps = {
 local S = {
   ops = {}, ---@type table<string, table>  plan id -> operation
   by_buf = {}, ---@type table<integer, table>
+  last = {}, ---@type table<string, { sql: string, mode: string, lines: string[] }>  conn id -> the last completed plan, for the AI hook
 }
 M._state = S
 
@@ -346,6 +347,8 @@ function M.handle_notification(method, p)
   op.error = present(p.error) and p.error or nil
   draw(op)
   if p.status == 'completed' then
+    local lines = M.render(op)
+    S.last[op.conn_id] = { sql = op.sql, mode = op.mode, lines = lines }
     deps.notify(('plan ready: %s'):format(title_of(op.sql)), vim.log.levels.INFO)
   elseif p.status == 'cancelled' then
     deps.notify(('plan cancelled: %s'):format(title_of(op.sql)), vim.log.levels.WARN)

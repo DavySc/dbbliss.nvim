@@ -699,6 +699,120 @@ local tests = {
     end,
   },
   {
+    -- Verifies: LLR-AI-8
+    'ask_hands_the_statement_under_the_cursor_and_the_connections_facts_to_the_hook',
+    '',
+    function()
+      dbbliss.setup({ connections = { a = { engine = 'postgres', connection_string = 'Host=x', env = 'dev', ai = true } }, ai = { command = { 'ai-cli' } } })
+      script_setup({ 'select 1;', 'select * from orders;' })
+      vim.api.nvim_win_set_cursor(0, { 2, 3 })
+      local ai = require('dbbliss.ai')
+      local saved, got = ai.ask, nil
+      ai.ask = function(a)
+        got = a
+      end
+      dbbliss.ask('why slow?', 'statement')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0), stmt('select * from orders;', 1) } })
+      ai.ask = saved
+      expect(got ~= nil, 'the hook was called')
+      expect(got.statement == 'select * from orders;' and got.question == 'why slow?', 'statement and question: ' .. vim.inspect(got))
+      expect(got.conn.id == 'c1' and got.conn.name == 'a' and got.conn.engine == 'postgres' and got.conn.env == 'dev' and got.conn.ai == true, 'connection facts: ' .. vim.inspect(got.conn))
+      expect(take('execute') == nil, 'nothing was run')
+      expect(next(dbbliss._state.scripts) == nil, 'the connection is not left marked busy')
+    end,
+  },
+  {
+    -- Verifies: LLR-AI-8
+    'ask_takes_one_statement_and_asks_for_a_question_when_none_is_given',
+    '',
+    function()
+      script_setup({ 'select 1;', 'select 2;' })
+      local ai = require('dbbliss.ai')
+      local saved, calls = ai.ask, 0
+      ai.ask = function()
+        calls = calls + 1
+      end
+      dbbliss.ask('q', 'range', { 1, 2 })
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0), stmt('select 2;', 1) } })
+      expect(calls == 0, 'two statements are not asked about as one')
+      expect(next(dbbliss._state.scripts) == nil, 'the mark is released')
+      local input = vim.fn.input
+      local asked
+      vim.fn.input = function(prompt)
+        asked = prompt
+        return 'what does this do?'
+      end
+      local got
+      ai.ask = function(a)
+        got = a
+      end
+      dbbliss.ask('', 'statement')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0) } })
+      vim.fn.input = input
+      ai.ask = saved
+      expect(asked ~= nil and got and got.question == 'what does this do?', 'asked for the question: ' .. vim.inspect(got))
+      local none
+      vim.fn.input = function()
+        return ''
+      end
+      ai.ask = function()
+        none = true
+      end
+      dbbliss.ask('', 'statement')
+      take('script/split').cb(nil, { statements = { stmt('select 1;', 0) } })
+      vim.fn.input = input
+      ai.ask = saved
+      expect(none == nil, 'no question, nothing asked')
+    end,
+  },
+  {
+    -- Verifies: HLR-AI-4
+    'ask_hands_over_the_last_error_and_plan_it_remembers',
+    '',
+    function()
+      script_setup({ 'select * from orders;' })
+      dbbliss.run('buffer')
+      take('script/split').cb(nil, { statements = { stmt('select * from orders;', 0) } })
+      finish_query({ status = 'error', error = { message = 'relation "orders" does not exist', line = 1 } })
+      local plan = require('dbbliss.plan')
+      plan._state.last['c1'] = { sql = 'select * from orders;', mode = 'estimated', lines = { 'Seq Scan' } }
+      local ai = require('dbbliss.ai')
+      local saved, got = ai.ask, nil
+      ai.ask = function(a)
+        got = a
+      end
+      dbbliss.ask('why?', 'statement')
+      take('script/split').cb(nil, { statements = { stmt('select * from orders;', 0) } })
+      ai.ask = saved
+      expect(got and got.last_error and got.last_error.sql == 'select * from orders;' and got.last_error.message:find('does not exist', 1, true), 'the error: ' .. vim.inspect(got and got.last_error))
+      expect(got.last_plan and got.last_plan.sql == 'select * from orders;' and got.last_plan.lines[1] == 'Seq Scan', 'the plan: ' .. vim.inspect(got and got.last_plan))
+      plan._state.last = {}
+    end,
+  },
+  {
+    -- Verifies: LLR-AI-8
+    'ask_subcommand_is_dispatched_and_completed_and_the_hook_stops_on_exit',
+    '',
+    function()
+      local saved, got = dbbliss.ask, nil
+      dbbliss.ask = function(question, scope, range)
+        got = { question, scope, range }
+      end
+      dbbliss.command({ args = 'ask why is this slow', range = 0 })
+      expect(vim.deep_equal(got, { 'why is this slow', 'statement', nil }), 'question words are joined: ' .. vim.inspect(got))
+      dbbliss.command({ args = 'ask', range = 2, line1 = 3, line2 = 4 })
+      expect(vim.deep_equal(got, { '', 'range', { 3, 4 } }), 'a range: ' .. vim.inspect(got))
+      dbbliss.ask = saved
+      expect(vim.tbl_contains(dbbliss.complete('', 'Dbbliss '), 'ask'), 'ask is completed')
+      local ai = require('dbbliss.ai')
+      local cancelled = false
+      ai._state.running = { { handle = { cancel = function() cancelled = true end } } }
+      dbbliss.on_exit()
+      expect(cancelled, 'quitting ends a running command')
+      ai._state.running = {}
+    end,
+  },
+  {
     -- Verifies: HLR-COMP-8
     'ddl_that_fails_reloads_nothing',
     '',

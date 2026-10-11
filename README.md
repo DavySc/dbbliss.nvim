@@ -245,6 +245,26 @@ require('cmp').register_source('dbbliss', require('dbbliss.completion.cmp').new(
 Not offered: functions and their parameters, columns of subqueries and CTEs. The adapters were written against the
 plugins' documented interfaces and are not tested against the plugins themselves.
 
+### Ask an AI about a statement
+
+`:Dbbliss ask [question]` pipes the statement under the cursor (or the one in the range), the `CREATE` definitions of the tables it
+names, and the last plan and error of that statement, to a command you configure, and shows the answer in a scratch buffer. The
+plugin has no model or API client; the command is any program that reads a prompt on standard input and prints an answer.
+
+```lua
+require('dbbliss').setup({
+  ai = { command = { 'claude', '-p' }, timeout_ms = 120000, max_bytes = 200000, max_tables = 10 },
+  connections = { dev1 = { engine = 'postgres', connection_string = '...', env = 'dev', ai = true } },
+})
+```
+
+It is off until you opt a connection in with `ai = true`. **Prod and untagged connections are refused** unless they say
+`ai = { prod = true }`. Before anything is sent you are shown what will be sent (which parts, how large, anything cut) and can look
+at the exact text first; answering No sends nothing, and on prod and untagged connections the question cannot be switched off. Result
+rows are never sent, but literals in the SQL, in the plan and in the error text are. The command is run without a shell (an argument
+list; on Windows use `{ 'cmd', '/c', 'claude', '-p' }` for a `.cmd` shim); `q` in the answer buffer cancels it. `ask` runs nothing
+on your database.
+
 ### Results
 
 Results go to the `dbbliss://results` buffer as aligned tables (column widths from the first rows,
@@ -289,4 +309,4 @@ The cancel suite drives the real backend (and a real headless Neovim for the "Ne
 scenarios) and checks the server from an independent connection. DB2 for i (deferred) runs only
 when `DBBLISS_TEST_DB2I` is set; see [docs/db2i-checklist.md](docs/db2i-checklist.md).
 
-Decisions to review: [docs/phase0-decisions.md](docs/phase0-decisions.md), and per phase `docs/phase*-decisions.md` (Phase 5: 61–67).
+Decisions to review: [docs/phase0-decisions.md](docs/phase0-decisions.md), and per phase `docs/phase*-decisions.md` (Phase 5: 61–72, Phase 6: 73–76).

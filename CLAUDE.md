@@ -6,6 +6,8 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 ## Status (2026-10-11)
 
+**Phase 6 (AI hook: `:Dbbliss ask`) is implemented on branch `ccr-48313f28-j61iv5`; not merged into `main`: stop for the user's review.** Decisions: `docs/phase6-decisions.md` (73–76). Code: `ai.lua`; tests `tests/nvim/ai_test.lua` (+ `ai_echo.lua`), client and e2e steps. After Phase 6 the user wants DB2 for i support (deferred since Phase 0; ask about access to an IBM i before building).
+
 **Phase 5 (plan viewer, completion) is complete and on `main`** (decisions reviewed and accepted by the user). Built spec-first (`HLR-PLAN-1..8`, `LLR-PLAN-9..12`, `HLR-COMP-1`,
 `LLR-COMP-2..5`) with `spec/tla/Operations.tla` extended for plans. Decisions to review:
 `docs/phase5-decisions.md` (61–67, including what was not checked). Code: `Plans/` (backend),

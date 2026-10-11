@@ -61,6 +61,20 @@
         "-l",
         "tests/nvim/completion_test.lua"
       ]
+    },
+    "lua-ai": {
+      "build": [
+        "true"
+      ],
+      "test": [
+        "{nvim}",
+        "--headless",
+        "--clean",
+        "--cmd",
+        "set rtp^=.",
+        "-l",
+        "tests/nvim/ai_test.lua"
+      ]
     }
   },
   "mutations": [
@@ -310,8 +324,8 @@
       "runner": "lua-client",
       "file": "lua/dbbliss/init.lua",
       "why": "a plan on prod asks the run-the-writes question as well as the plan question",
-      "find": "end, { skip_confirm = true })",
-      "replace": "end, {})",
+      "find": "      kind = statements[1].kind,\n    })\n  end, { skip_confirm = true })",
+      "replace": "      kind = statements[1].kind,\n    })\n  end, {})",
       "tests": [
         "plan_actual_of_a_write_on_prod_asks_once_and_not_for_the_run"
       ],
@@ -334,8 +348,8 @@
       "runner": "lua-client",
       "file": "lua/dbbliss/init.lua",
       "why": "planning leaves the connection marked as running a script",
-      "find": "    state.scripts[conn_id] = nil\n    if #statements ~= 1 then",
-      "replace": "    if #statements ~= 1 then",
+      "find": "    state.scripts[conn_id] = nil\n    if #statements ~= 1 then\n      notify(('plan takes",
+      "replace": "    if #statements ~= 1 then\n      notify(('plan takes",
       "tests": [
         "plan_command_plans_the_statement_under_the_cursor"
       ],
@@ -765,6 +779,246 @@
         "completion_asks_for_nothing_while_this_clients_ddl_transaction_is_open"
       ],
       "verifies": "LLR-COMP-12"
+    },
+    {
+      "id": "AI-1",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "ask works without a configured command",
+      "find": "  if cfg.command == nil then",
+      "replace": "  if false then",
+      "tests": [
+        "ai_needs_a_command_and_an_opted_in_connection"
+      ],
+      "verifies": "HLR-AI-1"
+    },
+    {
+      "id": "AI-2",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "a connection that never opted in is asked about",
+      "find": "  if opt == nil or opt == vim.NIL or opt == false then",
+      "replace": "  if false then",
+      "tests": [
+        "ai_needs_a_command_and_an_opted_in_connection"
+      ],
+      "verifies": "HLR-AI-1"
+    },
+    {
+      "id": "AI-3",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "a prod connection is allowed without saying so",
+      "find": "  if protected and not (type(opt) == 'table' and opt.prod == true) then",
+      "replace": "  if false then",
+      "tests": [
+        "ai_is_refused_on_prod_and_untagged_connections_unless_they_say_so"
+      ],
+      "verifies": "HLR-AI-2"
+    },
+    {
+      "id": "AI-4",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "an untagged or oddly tagged connection counts as not protected",
+      "find": "  local protected = env ~= 'dev' and env ~= 'test'",
+      "replace": "  local protected = env == 'prod'",
+      "tests": [
+        "ai_is_refused_on_prod_and_untagged_connections_unless_they_say_so"
+      ],
+      "verifies": "HLR-AI-2"
+    },
+    {
+      "id": "AI-5",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "the text is sent although the user said No",
+      "find": "      if choice ~= 'send' then",
+      "replace": "      if false then",
+      "tests": [
+        "ai_shows_what_will_be_sent_and_sends_nothing_on_no"
+      ],
+      "verifies": "HLR-AI-3"
+    },
+    {
+      "id": "AI-6",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "the question can be switched off on a prod connection",
+      "find": "  local need = cfg.confirm ~= false or protected",
+      "replace": "  local need = cfg.confirm ~= false",
+      "tests": [
+        "ai_cannot_skip_the_question_on_prod"
+      ],
+      "verifies": "HLR-AI-3"
+    },
+    {
+      "id": "AI-7",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "the last error of another statement is sent",
+      "find": "  if e and squash(e.sql) == squash(a.statement) then",
+      "replace": "  if e then",
+      "tests": [
+        "ai_adds_the_last_plan_and_error_of_this_statement_only"
+      ],
+      "verifies": "HLR-AI-4"
+    },
+    {
+      "id": "AI-8",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "the last plan of another statement is sent",
+      "find": "  if p and squash(p.sql) == squash(a.statement) then",
+      "replace": "  if p then",
+      "tests": [
+        "ai_adds_the_last_plan_and_error_of_this_statement_only"
+      ],
+      "verifies": "HLR-AI-4"
+    },
+    {
+      "id": "AI-9",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "the payload is not bounded",
+      "find": "    if #block <= room then",
+      "replace": "    if true then",
+      "tests": [
+        "ai_bounds_the_payload_and_says_what_it_cut"
+      ],
+      "verifies": "HLR-AI-4"
+    },
+    {
+      "id": "AI-10",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "a statement that alone exceeds the limit is sent",
+      "find": "  if fixed > cfg.max_bytes then",
+      "replace": "  if false then",
+      "tests": [
+        "ai_bounds_the_payload_and_says_what_it_cut"
+      ],
+      "verifies": "HLR-AI-4"
+    },
+    {
+      "id": "AI-11",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "a command given as one string (a shell line) is accepted",
+      "find": "  if type(cfg.command) ~= 'table' or #cfg.command == 0 then",
+      "replace": "  if #cfg.command == 0 then",
+      "tests": [
+        "ai_runs_the_command_without_a_shell_with_the_payload_on_stdin"
+      ],
+      "verifies": "LLR-AI-5"
+    },
+    {
+      "id": "AI-12",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "every table of the statement is read, whatever the limit",
+      "find": "    if i <= cfg.max_tables then",
+      "replace": "    if true then",
+      "tests": [
+        "ai_names_a_table_it_could_not_read_and_the_ones_it_left_out"
+      ],
+      "verifies": "LLR-AI-7"
+    },
+    {
+      "id": "AI-13",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "an empty answer is shown as an answer",
+      "find": "    elseif vim.trim(res.stdout or '') == '' then",
+      "replace": "    elseif false then",
+      "tests": [
+        "ai_reports_a_failed_command_a_timeout_and_an_empty_answer_as_what_they_are"
+      ],
+      "verifies": "LLR-AI-5"
+    },
+    {
+      "id": "AI-14",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "a failed command's output is shown as an answer",
+      "find": "    elseif res.code ~= 0 then",
+      "replace": "    elseif false then",
+      "tests": [
+        "ai_reports_a_failed_command_a_timeout_and_an_empty_answer_as_what_they_are"
+      ],
+      "verifies": "LLR-AI-5"
+    },
+    {
+      "id": "AI-15",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "a timeout is not reported as one",
+      "find": "    elseif res.timed_out then",
+      "replace": "    elseif false then",
+      "tests": [
+        "ai_reports_a_failed_command_a_timeout_and_an_empty_answer_as_what_they_are"
+      ],
+      "verifies": "LLR-AI-5"
+    },
+    {
+      "id": "AI-16",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "a command that does not exist is not reported",
+      "find": "    if res.start_error then",
+      "replace": "    if false then",
+      "tests": [
+        "ai_reports_a_failed_command_a_timeout_and_an_empty_answer_as_what_they_are"
+      ],
+      "verifies": "LLR-AI-5"
+    },
+    {
+      "id": "AI-17",
+      "runner": "lua-ai",
+      "file": "lua/dbbliss/ai.lua",
+      "why": "quitting leaves the command running",
+      "find": "    op.cancelled = true\n    if op.handle then\n      op.handle.cancel()\n    end\n  end\n  S.running = {}",
+      "replace": "    op.cancelled = true\n  end\n  S.running = {}",
+      "tests": [
+        "ai_q_cancels_a_running_command_and_quit_ends_it"
+      ],
+      "verifies": "LLR-AI-6"
+    },
+    {
+      "id": "AI-18",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the hook is not stopped when Neovim quits",
+      "find": "function M.on_exit()\n  ai.stop()",
+      "replace": "function M.on_exit()",
+      "tests": [
+        "ask_subcommand_is_dispatched_and_completed_and_the_hook_stops_on_exit"
+      ],
+      "verifies": "LLR-AI-6"
+    },
+    {
+      "id": "AI-19",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "the last error is not handed over",
+      "find": "      last_error = conn.last_error,",
+      "replace": "      last_error = nil,",
+      "tests": [
+        "ask_hands_over_the_last_error_and_plan_it_remembers"
+      ],
+      "verifies": "HLR-AI-4"
+    },
+    {
+      "id": "AI-20",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "two statements are asked about as one",
+      "find": "    if #statements ~= 1 then\n      notify(('ask takes one",
+      "replace": "    if #statements < 1 then\n      notify(('ask takes one",
+      "tests": [
+        "ask_takes_one_statement_and_asks_for_a_question_when_none_is_given"
+      ],
+      "verifies": "LLR-AI-8"
     }
   ]
 }

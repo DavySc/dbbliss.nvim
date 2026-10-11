@@ -33,8 +33,11 @@ dbbliss.setup({
         or nil,
       options = env.DBBLISS_TEST_PG_BIN and { pg_dump = env.DBBLISS_TEST_PG_BIN } or nil,
       env = 'dev',
+      ai = true,
     },
   },
+  -- The AI command is Neovim itself, echoing what it is sent (tests/nvim/ai_echo.lua).
+  ai = { command = { vim.v.progpath, '--headless', '--clean', '-l', 'tests/nvim/ai_echo.lua' }, confirm = false, timeout_ms = 30000 },
 })
 
 local function expect(cond, msg)
@@ -623,6 +626,50 @@ local steps = {
         wait('the committed table in completion', offered, 15000)
       end)
       dbbliss._catalog_request = original
+      sql(drop)
+      if not ok then
+        error(err, 0)
+      end
+    end,
+  },
+  {
+    -- Verifies: HLR-AI-4, LLR-AI-7
+    'ask_sends_the_statement_and_table_definitions_but_no_rows',
+    function()
+      local t = 'e2e_ai_t'
+      local q = pg and t or ('dbo.' .. t)
+      local function sql(statement)
+        buffer({ statement })
+        dbbliss.run('buffer')
+        wait('the statement', idle)
+      end
+      local drop = pg and ('drop table if exists ' .. t) or ("if object_id('dbo." .. t .. "') is not null drop table dbo." .. t)
+      sql(drop)
+      local ok, err = pcall(function()
+        sql('create table ' .. q .. ' (id int, label varchar(20))')
+        sql('insert into ' .. q .. " values (1, 'zebra_secret')")
+        sql('select * from ' .. q) -- the rows are on screen now; they must not travel
+        buffer({ 'select * from ' .. q })
+        dbbliss.ask('what is this table for?', 'statement')
+        local text = ''
+        wait('the answer', function()
+          for _, b in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.bo[b].filetype == 'dbbliss-ai' then
+              text = table.concat(vim.api.nvim_buf_get_lines(b, 0, -1, false), '\n')
+            end
+          end
+          return text:find('ANSWER<<', 1, true) ~= nil
+        end, 30000)
+        expect(text:find('what is this table for?', 1, true), 'the question was sent:\n' .. text)
+        expect(text:find('select * from ' .. q, 1, true), 'the statement was sent')
+        expect(text:lower():find('create table', 1, true) and text:find('label', 1, true), 'and the definition of the table it names:\n' .. text)
+        expect(not text:find('zebra_secret', 1, true), 'no row content was sent')
+      end)
+      for _, b in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.bo[b].filetype == 'dbbliss-ai' then
+          pcall(vim.api.nvim_buf_delete, b, { force = true })
+        end
+      end
       sql(drop)
       if not ok then
         error(err, 0)

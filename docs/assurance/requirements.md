@@ -580,6 +580,47 @@ the next request, and never while a transaction is open on the connection (the c
 wait for its locks). Columns are reloaded lazily when asked for after the connection's schema changed.
 Source: user request; decision 69.
 
+## AI hook (Phase 6)
+
+### HLR-AI-1
+`:Dbbliss ask` shall do nothing unless a command is configured (`ai.command`) and the connection has
+opted in (`ai = true` on the connection); it shall say which of the two is missing. Source: phase 6 plan;
+decision 73.
+
+### HLR-AI-2
+On a connection tagged `prod`, or not tagged at all, `ask` shall be refused unless the connection says
+`ai = { prod = true }`: schema, SQL and error texts leave the machine. Source: priorities (no surprise
+exposure); the prod rule of decision 58; decision 73.
+
+### HLR-AI-3
+Before anything is sent the user shall be shown what will be sent (which parts, how large, and the full
+text on request) and asked; nothing is sent on No. The question cannot be turned off on a prod or untagged
+connection. Source: phase 6 plan; decision 73.
+
+### HLR-AI-4
+What is sent shall be limited to: the question, the statement, the definitions of the tables that
+statement names, and the last plan and last error of that same statement. Result rows are never sent. The
+total is bounded (`ai.max_bytes`) and anything cut is said, in the payload and in the confirmation. Source:
+phase 6 plan; decision 73.
+
+### LLR-AI-5
+The command shall be run without a shell (an argument list), with the payload on its standard input, bounded
+by `ai.timeout_ms`, and be cancellable; a non-zero exit, a timeout and an empty answer shall each be reported
+with the command's own stderr, never shown as an answer. Source: priorities (no silent failures); decision 74.
+
+### LLR-AI-6
+The answer shall be shown in a scratch buffer of its own. No SQL is executed by `ask`, no result buffer, tree
+or connection state is changed, and the command is ended when Neovim quits. Source: phase 6 plan; decision 74.
+
+### LLR-AI-7
+The tables of the statement shall be found from its text (as completion does) and their definitions read with
+`catalog/script` on the catalog session; a table that cannot be read is named as missing, not skipped silently.
+At most `ai.max_tables` are included, and the rest named. Source: phase 6 plan; decision 75.
+
+### LLR-AI-8
+`:Dbbliss ask [question]` shall take the statement under the cursor or the range (exactly one), ask for a
+question when none is given, and be completed. Source: phase 6 plan.
+
 ## Client interface
 
 ### HLR-UI-1
