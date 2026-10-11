@@ -718,6 +718,17 @@
         "ddl_that_fails_reloads_nothing"
       ],
       "verifies": "HLR-COMP-8"
+    },
+    {
+      "id": "SESS-1",
+      "file": "backend/src/Dbbliss.Backend/Sessions/SqlServerSessions.cs",
+      "why": "a session that ended between the list and the status call is an error, not 'gone'",
+      "find": "catch (SqlException ex) when (ex.Number == NotActiveProcess)",
+      "replace": "catch (SqlException ex) when (false && ex.Number == NotActiveProcess)",
+      "tests": [
+        "sessions_sqlserver_status_of_a_session_that_ended_meanwhile"
+      ],
+      "verifies": "HLR-ADM-8"
     }
   ]
 }

@@ -100,6 +100,37 @@ public static class SessionEngineTests
         if (absent.Present || gone.Sent.Count != 1) throw new TestFailure("a session that is gone needs no KILL ... STATUSONLY");
     }
 
+    // Verifies: HLR-ADM-8
+    // The session was listed, then ended before KILL ... WITH STATUSONLY reached the server: it is gone, which is
+    // an answer (status says so), not an error (PR-026: seen once on CI as "Process ID 65 is not an active process ID").
+    public static async Task SqlServerStatusOfASessionThatEndedMeanwhileSaysItIsGone()
+    {
+        var admin = new SqlServerSessions();
+        var session = new Scripted((sql, _) =>
+        {
+            if (sql.Contains("dm_exec_sessions", StringComparison.Ordinal)) return OneRow();
+            if (sql == "KILL 55 WITH STATUSONLY") throw SqlErrors.Make(6106, "Process ID 55 is not an active process ID.");
+            return [];
+        });
+        var status = await admin.StatusAsync(session, new SessionTarget("55", Token), new MessageLog(), CancellationToken.None);
+        if (status.Present) throw new TestFailure("a session that ended between the two queries was reported present: " + status);
+        // Any other error of the statement is still an error.
+        var broken = new Scripted((sql, _) =>
+        {
+            if (sql.Contains("dm_exec_sessions", StringComparison.Ordinal)) return OneRow();
+            throw SqlErrors.Make(6104, "Cannot use KILL to kill your own process.");
+        });
+        try
+        {
+            await admin.StatusAsync(broken, new SessionTarget("55", Token), new MessageLog(), CancellationToken.None);
+        }
+        catch (SessionActionException)
+        {
+            return;
+        }
+        throw new TestFailure("another KILL error was swallowed");
+    }
+
     // Verifies: HLR-ADM-3, HLR-ADM-5, HLR-ADM-8
     public static async Task PostgresSignalsAreMatchedAndReported()
     {

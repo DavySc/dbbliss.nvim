@@ -17,6 +17,7 @@ public sealed class SqlServerSessions : ISessionAdmin
 
     /// <summary>"Status report cannot be obtained. Rollback operation for Process ID n is not in progress."</summary>
     private const int NoRollback = 6120;
+    private const int NotActiveProcess = 6106;
 
     public bool CanCancel => false;
 
@@ -73,11 +74,20 @@ public sealed class SqlServerSessions : ISessionAdmin
         messages.Drain();
         try
         {
-            await GuardAsync(() => session.QueryAsync("KILL " + id.ToString(CultureInfo.InvariantCulture) + " WITH STATUSONLY", null, ct));
+            await session.QueryAsync("KILL " + id.ToString(CultureInfo.InvariantCulture) + " WITH STATUSONLY", null, ct);
         }
         catch (SqlException ex) when (ex.Number == NoRollback)
         {
             return new SessionStatus(true, null);
+        }
+        catch (SqlException ex) when (ex.Number == NotActiveProcess)
+        {
+            // It was listed a moment ago and has ended since (its rollback finished): gone is the answer.
+            return new SessionStatus(false, null);
+        }
+        catch (SqlException ex) when (UserErrors.Contains(ex.Number))
+        {
+            throw new SessionActionException(ex.Message);
         }
         var said = messages.Drain();
         return new SessionStatus(true, said.Count == 0 ? null : string.Join("\n", said));

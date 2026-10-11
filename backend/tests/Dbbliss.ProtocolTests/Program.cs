@@ -166,6 +166,8 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("sessions_sqlserver_kill_built_from_checked_integer", "", SessionEngineTests.SqlServerKillIsBuiltFromTheCheckedInteger),
     // Verifies: HLR-ADM-7
     ("sessions_sqlserver_status_reads_this_calls_messages", "", SessionEngineTests.SqlServerStatusReadsOnlyThisCallsMessages),
+    // Verifies: HLR-ADM-8
+    ("sessions_sqlserver_status_of_a_session_that_ended_meanwhile", "", SessionEngineTests.SqlServerStatusOfASessionThatEndedMeanwhileSaysItIsGone),
     // Verifies: HLR-ADM-3, HLR-ADM-5, HLR-ADM-8
     ("sessions_postgres_signals_matched_and_reported", "", SessionEngineTests.PostgresSignalsAreMatchedAndReported),
     // Verifies: HLR-ADM-1

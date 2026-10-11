@@ -36,6 +36,7 @@ because they weaken the evidence.
 | PR-023 | assurance (reading `DescribeError` for coverage) | A SQL Server error that is not in a statement (a refused connection, a failed login) reported line 0 instead of no line | HLR-SCRIPT-3 | the line is reported only when the server gave one; `connect_failure` |
 | PR-024 | assurance (inspection of the harness, Phase 5) | `trace.py` let a test take the `Verifies:` tags of the test above it (a window of three lines), so 134 of 255 test-to-requirement links were claimed by tests that do not verify them | (tooling) | a tag stops at the previous registry line; `test_trace.py`, test: a tag does not cross into the previous test |
 | PR-025 | assurance (inspection of the harness, Phase 5) | The cancel suite passed when an engine was not configured or a scenario skipped, so a CI run could be green with half its evidence missing | (tooling) | `DBBLISS_REQUIRE_ENGINES` and `DBBLISS_ALLOWED_SKIPS` in CI |
+| PR-026 | CI (Linux, `sessions_rollback_progress`, once) | SQL Server `sessions/status` of a session that was listed and then finished its rollback before `KILL ... WITH STATUSONLY` ran failed with error 6106 ("Process ID n is not an active process ID") instead of saying the session is gone | HLR-ADM-8 | the error means gone; `sessions_sqlserver_status_of_a_session_that_ended_meanwhile` (failed first, with a driver-error stand-in built by `SqlErrors`) |
 
 ## Open
 
