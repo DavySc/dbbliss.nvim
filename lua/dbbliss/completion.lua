@@ -97,6 +97,11 @@ local RESERVED = {
     schema securityaudit select semantickeyphrasetable semanticsimilaritydetailstable semanticsimilaritytable session_user set setuser
     shutdown some statistics system_user table tablesample textsize then to top tran transaction trigger truncate try_convert tsequal
     union unique unpivot update updatetext use user values varying view waitfor when where while with within writetext]]),
+  -- DB2 for i (unverified: from IBM's reserved-word list as remembered, kept to the words that matter in a name).
+  db2i = set([[all alter and any as asc between by case check column constraint create cross current cursor default delete desc distinct
+    drop else end except exists fetch for foreign from full grant group having in index inner insert intersect into is join left like
+    not null on or order outer primary references revoke right schema select set some table then to union unique update user using
+    values view when where with]]),
 }
 
 --- The identifier as it must be written to mean this name on this engine.
@@ -109,6 +114,13 @@ function M.quote(name, engine)
       return name
     end
     return '[' .. name:gsub('%]', ']]') .. ']'
+  end
+  if engine == 'db2i' then
+    -- Unquoted names fold to upper case, so only an upper-case name is written plain.
+    if name:match('^[A-Z][A-Z0-9_$#@]*$') and not RESERVED.db2i[name:lower()] then
+      return name
+    end
+    return '"' .. name:gsub('"', '""') .. '"'
   end
   if name:match('^[a-z_][a-z0-9_$]*$') and not RESERVED.postgres[name] then
     return name
@@ -651,7 +663,7 @@ local function keyword_items(ctx, engine, statement)
   if not deps.keywords then
     return {}
   end
-  local set = keywords[engine == 'sqlserver' and 'sqlserver' or 'postgres']
+  local set = keywords[(engine == 'sqlserver' or engine == 'db2i') and engine or 'postgres']
   local words = ctx.at_start and set.start or set.inside
   local upper = keyword_case(statement, ctx.partial) == 'upper'
   local items = {}

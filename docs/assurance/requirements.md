@@ -654,6 +654,47 @@ The package shall carry its help (`doc/dbbliss.txt` with an up-to-date `doc/tags
 `:checkhealth dbbliss` shall report the Neovim version against the minimum, whether the backend executable exists (and where),
 whether `dotnet` is available for building, and the platform identifier. Source: HLR-PACK-1.
 
+## DB2 for i catalog (Phase 7, unverified against a real system)
+
+All requirements here are verified against a scripted session only: the QSYS2 SQL has never run on an
+IBM i (`docs/db2i-checklist.md`, `docs/db2i-research.md`, decision 77).
+
+### HLR-DB2I-1
+For a DB2 for i connection the schema tree shall show the system (`CURRENT_SERVER`) as the one database,
+then its schemas (IBM-supplied ones flagged as system), then folders for tables, views, functions and
+procedures; routines are told apart by their specific name. Source: phase 7 plan; decision 77.
+
+### HLR-DB2I-2
+`catalog/describe` and `catalog/script` shall work for DB2 for i tables, views, functions and procedures
+from the QSYS2 catalog views. A table script is built by the backend from catalog rows (columns, defaults,
+identity, primary/unique/check/foreign keys), not from `QSYS2.GENERATE_SQL`; a view or routine script is
+the stored definition, with `CREATE VIEW ... AS` added when the stored text is only the query. A column that is
+generated other than as an identity (row change timestamp, ROWID, ...) makes the script refuse, naming the column,
+rather than write it as an ordinary column.
+Source: phase 7 plan; decision 77.
+
+### LLR-DB2I-3
+A name typed for DB2 for i, long or system (10-character) name, shall resolve with the current schema for an unqualified name, match the
+upper-cased name when the written one matches nothing (unquoted names fold to upper case), reject a
+database part other than the connected system, and name the overloads when a routine is ambiguous.
+Source: decision 77.
+
+### LLR-DB2I-4
+Catalog parameters shall reach ODBC as positional markers in the order the names occur; a `@name` inside
+a string literal or quoted identifier is not a parameter, and a name with no value is an error.
+Source: decision 77.
+
+### LLR-DB2I-5
+`catalog/names` and `catalog/columns` shall work for DB2 for i with the same limit, truncation and
+system-schema rules as the other engines; the limit is written into the SQL as a checked integer.
+Source: HLR-COMP-1; decision 77.
+
+### LLR-DB2I-6
+Completion on a DB2 for i connection shall write a name plain only when it is upper case, starts with a
+letter, uses letters, digits and `_ $ # @`, and is not reserved; every other name in double quotes (doubled
+quotes inside). It shall offer DB2 for i's own statement and clause keywords, not PostgreSQL's or SQL
+Server's. Source: decision 77.
+
 ## Client interface
 
 ### HLR-UI-1

@@ -49,3 +49,17 @@ Also check by hand:
 - [ ] After each cancel, the connection is still usable: run `SELECT 1 FROM SYSIBM.SYSDUMMY1`.
 - [ ] `QSYS2.CANCEL_SQL` exists on the release, for Phase 3.
 - [ ] Repeat on Windows with the Windows ODBC driver.
+
+## Catalog queries (Phase 7, step 1)
+
+Run these from `Db2iCatalog` by hand (or through `:Dbbliss tree` / `info` / `script`) and record the result; the open questions are in
+`docs/db2i-research.md` (second pass). Replace `S` and `T` with a schema and table of yours.
+
+- [ ] `SELECT CURRENT_SERVER FROM SYSIBM.SYSDUMMY1` returns the system name.
+- [ ] `SELECT SCHEMA_NAME FROM QSYS2.SYSSCHEMAS ORDER BY SCHEMA_NAME` lists your schemas (compare with `OBJECT_STATISTICS('*ALLSIMPLE','LIB')`).
+- [ ] `QSYS2.SYSCOLUMNS2` accepts the select list in `ReadColumnsAsync`; a `TIMESTAMP(0)` column shows its precision.
+- [ ] `QSYS2.SYSINDEXES` has `IS_UNIQUE` (values D/U/V) and `QSYS2.SYSKEYS` has `ORDINAL_POSITION` and `ORDERING`.
+- [ ] `QSYS2.SYSREFCST` has `UPDATE_RULE`, `DELETE_RULE`, `UNIQUE_CONSTRAINT_SCHEMA`, `UNIQUE_CONSTRAINT_NAME`; `QSYS2.CHECK_CONSTRAINTS` has `CHECK_CLAUSE`.
+- [ ] `SYSVIEWS.VIEW_DEFINITION` holds the whole `CREATE VIEW` or only the query (the script copes with both).
+- [ ] The table script, run after dropping a test table, recreates it.
+- [ ] `FETCH FIRST n ROWS ONLY` after `UNION ALL` in a derived table works through the ODBC driver; `catalog/names` time on a large system.

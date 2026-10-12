@@ -78,7 +78,7 @@ scripts\build.ps1           # → bin\win-x64\dbbliss-backend.exe
 require('dbbliss').setup({
   connections = {
     local_pg = {
-      engine = 'postgres',              -- 'postgres' | 'sqlserver' ('db2i' is deferred)
+      engine = 'postgres',              -- 'postgres' | 'sqlserver' | 'db2i' (catalog only, unverified)
       env = 'dev',                      -- 'dev' | 'test' | 'prod'
       connection_string = 'Host=localhost;Port=5432;Username=me;Database=app',
       password = { env = 'APP_PG_PASSWORD' },   -- a reference; literal passwords are rejected
@@ -306,6 +306,12 @@ at the exact text first; answering No sends nothing, and on prod and untagged co
 rows are never sent, but literals in the SQL, in the plan and in the error text are. The command is run without a shell (an argument
 list; on Windows use `{ 'cmd', '/c', 'claude', '-p' }` for a `.cmd` shim); `q` in the answer buffer cancels it. `ask` runs nothing
 on your database.
+
+### DB2 for i (catalog only, unverified)
+
+A connection with `engine = 'db2i'` (IBM i Access ODBC driver, `docs/db2i-checklist.md`) has the schema tree, `:Dbbliss info`,
+`:Dbbliss script` and completion, built from the QSYS2 catalog views. **None of it has run on an IBM i**: the tests use a scripted
+session. Sessions, plans, backup and drop are not available for it yet. Details and limits: `docs/phase7-decisions.md`.
 
 ### Results
 

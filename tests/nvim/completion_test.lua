@@ -235,6 +235,27 @@ local tests = {
     end,
   },
   {
+    -- Verifies: LLR-DB2I-6
+    'completion_db2i_folds_to_upper_case_and_has_its_own_keywords',
+    function()
+      eq(completion.quote('ORDERS', 'db2i'), 'ORDERS', 'upper case is plain')
+      eq(completion.quote('Orders', 'db2i'), '"Orders"', 'DB2 for i folds to upper case: mixed case needs quotes')
+      eq(completion.quote('orders', 'db2i'), '"orders"', 'lower case needs quotes too')
+      eq(completion.quote('ORDER LINE', 'db2i'), '"ORDER LINE"', 'a space')
+      eq(completion.quote('SELECT', 'db2i'), '"SELECT"', 'a reserved word')
+      eq(completion.quote('A#1', 'db2i'), 'A#1', 'IBM i allows # $ @ in names')
+      eq(completion.quote('SAY "HI"', 'db2i'), '"SAY ""HI"""', 'quotes are doubled')
+      local f = fake({ engine = 'db2i' })
+      local out = labels(f, '')
+      for _, kw in ipairs({ 'select', 'with', 'call', 'commit', 'values' }) do
+        expect(vim.tbl_contains(out, kw), kw .. ' opens a DB2 for i statement: ' .. table.concat(out, ' '))
+      end
+      expect(not vim.tbl_contains(out, 'explain') and not vim.tbl_contains(out, 'exec'), 'PostgreSQL and SQL Server openers are not offered')
+      expect(vim.tbl_contains(labels(f, 'select * from t fetch '), 'fetch first'), 'FETCH FIRST is how DB2 for i limits rows')
+      expect(not vim.tbl_contains(labels(f, 'select * from t li'), 'limit'), 'LIMIT is not offered')
+    end,
+  },
+  {
     -- Verifies: LLR-COMP-3
     'completion_inserts_quoted_what_needs_quotes_for_the_engine',
     function()

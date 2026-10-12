@@ -8,7 +8,9 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 **Installing with Neovim packages / `vim.pack` is on `main`** (decision 79, `docs/install-decisions.md`): `lua/dbbliss/build.lua` (`:Dbbliss build`), `health.lua`, `doc/` (keep `doc/tags` current: `nvim --clean -c 'helptags doc' -c q`), `tests/nvim/pack_test.lua`, CI job `lua-vim-pack` (Neovim 0.12.2).
 
-**Phase 6 (AI hook: `:Dbbliss ask`) is complete and on `main`.** Decisions: `docs/phase6-decisions.md` (73–76). Code: `ai.lua`; tests `tests/nvim/ai_test.lua` (+ `ai_echo.lua`), client and e2e steps. Next: DB2 for i support. The user has no IBM i; the plan is to build from DBeaver's open-source DB2 for i support and IBM's documentation as the reference, with everything marked unverified until run on a real system (`docs/db2i-checklist.md`).
+**Phase 7 (DB2 for i, step 1: catalog) is on branch `ccr-48313f28-j61iv5`, not merged: stop for the user's review.** Unverified against any IBM i (the user has none). Decisions: `docs/phase7-decisions.md` (77–78); reference notes `docs/db2i-research.md` (DBeaver's plugin uses JT400 JDBC, so only its QSYS2 SQL is reusable). Code: `Catalog/Db2iCatalog.cs`, `Db2iSql.cs`, `Db2iEngine.QueryAsync`, completion quoting/keywords in Lua; tests `Db2iCatalogTests.cs`, mutations DB2I-1..15. Still to do for the engine: sessions, estimated plans, drop (backup is out), classifier/dialect pieces.
+
+**Phase 6 (AI hook: `:Dbbliss ask`) is complete and on `main`.** Decisions: `docs/phase6-decisions.md` (73–76). Code: `ai.lua`; tests `tests/nvim/ai_test.lua` (+ `ai_echo.lua`), client and e2e steps.
 
 **Phase 5 (plan viewer, completion) is complete and on `main`** (decisions reviewed and accepted by the user). Built spec-first (`HLR-PLAN-1..8`, `LLR-PLAN-9..12`, `HLR-COMP-1`,
 `LLR-COMP-2..5`) with `spec/tla/Operations.tla` extended for plans. Decisions to review:

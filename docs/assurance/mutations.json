@@ -1372,6 +1372,187 @@
         "dbbliss_build_subcommand_runs_the_build_and_is_completed"
       ],
       "verifies": "LLR-PACK-4"
+    },
+    {
+      "id": "DB2I-1",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iSql.cs",
+      "why": "a @name inside a string literal is taken for a parameter",
+      "find": "else if (c is '\\'' or '\"')",
+      "replace": "else if (c is '\"')",
+      "tests": [
+        "db2i_parameters_become_positional_markers"
+      ],
+      "verifies": "LLR-DB2I-4"
+    },
+    {
+      "id": "DB2I-2",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iSql.cs",
+      "why": "a parameter's value is lost",
+      "find": "values.Add(value);",
+      "replace": "values.Add(null);",
+      "tests": [
+        "db2i_parameters_become_positional_markers"
+      ],
+      "verifies": "LLR-DB2I-4"
+    },
+    {
+      "id": "DB2I-3",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "the folded name is not tried when the written one matches nothing",
+      "find": "if (upper.Item1 != schema || upper.Item2 != name) yield return upper;",
+      "replace": "if (upper.Item1 == schema && upper.Item2 == name) yield return upper;",
+      "tests": [
+        "db2i_names_resolve_like_the_server_reads_them"
+      ],
+      "verifies": "LLR-DB2I-3"
+    },
+    {
+      "id": "DB2I-4",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "QSYS2 is shown as an ordinary schema",
+      "find": "[\"QSYS\", \"QSYS2\", ",
+      "replace": "[\"QSYS\", ",
+      "tests": [
+        "db2i_tree_shows_system_schemas_folders"
+      ],
+      "verifies": "HLR-DB2I-1"
+    },
+    {
+      "id": "DB2I-5",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "the limit is not told from 'there was more'",
+      "find": "var fetch = (limit + 1)",
+      "replace": "var fetch = (limit)",
+      "tests": [
+        "db2i_names_and_columns_for_completion"
+      ],
+      "verifies": "LLR-DB2I-5"
+    },
+    {
+      "id": "DB2I-6",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "a view definition that is only the query gets no CREATE VIEW head",
+      "find": "(def.StartsWith(\"CREATE\", StringComparison.OrdinalIgnoreCase) ? def :",
+      "replace": "(!def.StartsWith(\"CREATE\", StringComparison.OrdinalIgnoreCase) ? def :",
+      "tests": [
+        "db2i_view_and_routine_scripts_are_stored_definitions"
+      ],
+      "verifies": "HLR-DB2I-2"
+    },
+    {
+      "id": "DB2I-7",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "a cascade rule is dropped from a foreign key script",
+      "find": "if (fk.DeleteRule != \"NO ACTION\")",
+      "replace": "if (fk.DeleteRule == \"NO ACTION\")",
+      "tests": [
+        "db2i_table_script_from_catalog_rows"
+      ],
+      "verifies": "HLR-DB2I-2"
+    },
+    {
+      "id": "DB2I-8",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iSql.cs",
+      "why": "a mixed-case name is written unquoted",
+      "find": "char.IsAsciiLetterUpper(name[0]) && name.All(c => char.IsAsciiLetterUpper(c)",
+      "replace": "char.IsAsciiLetter(name[0]) && name.All(c => char.IsAsciiLetter(c)",
+      "tests": [
+        "db2i_identifiers_and_types_as_declared"
+      ],
+      "verifies": "HLR-DB2I-2"
+    },
+    {
+      "id": "DB2I-9",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iSql.cs",
+      "why": "a decimal loses its precision and scale",
+      "find": "if (type is \"DECIMAL\" or \"NUMERIC\") return",
+      "replace": "if (type is \"NUMERIC\") return",
+      "tests": [
+        "db2i_identifiers_and_types_as_declared"
+      ],
+      "verifies": "HLR-DB2I-2"
+    },
+    {
+      "id": "DB2I-10",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "a name on another system is browsed anyway",
+      "find": "if (!string.Equals(database, server, StringComparison.OrdinalIgnoreCase))",
+      "replace": "if (string.Equals(database, server, StringComparison.OrdinalIgnoreCase))",
+      "tests": [
+        "db2i_tree_shows_system_schemas_folders",
+        "db2i_names_and_columns_for_completion"
+      ],
+      "verifies": "HLR-DB2I-1"
+    },
+    {
+      "id": "DB2I-11",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a mixed-case DB2 for i name is written unquoted",
+      "find": "'^[A-Z][A-Z0-9_$#@]*$'",
+      "replace": "'^[A-Za-z][A-Za-z0-9_$#@]*$'",
+      "tests": [
+        "completion_db2i_folds_to_upper_case_and_has_its_own_keywords"
+      ],
+      "verifies": "LLR-DB2I-6"
+    },
+    {
+      "id": "DB2I-12",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "key columns are ordered by a column SYSKEYCST does not have",
+      "find": "ORDER BY CONSTRAINT_NAME, COLUMN_POSITION",
+      "replace": "ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION",
+      "tests": [
+        "db2i_table_script_from_catalog_rows"
+      ],
+      "verifies": "HLR-DB2I-2"
+    },
+    {
+      "id": "DB2I-13",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "a row change timestamp column is scripted as an ordinary column",
+      "find": "has is not (\"\" or \"Y\" or \"N\")",
+      "replace": "has is not (\"\" or \"Y\" or \"N\" or \"E\")",
+      "tests": [
+        "db2i_generated_columns_that_cannot_be_scripted_are_refused"
+      ],
+      "verifies": "HLR-DB2I-2"
+    },
+    {
+      "id": "DB2I-14",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "a routine's return value is listed as a parameter",
+      "find": "Str(r[7]) == \"R\" ? \"returns\" : r[1]",
+      "replace": "r[1]",
+      "tests": [
+        "db2i_routine_description_separates_parameters_from_return_value"
+      ],
+      "verifies": "HLR-DB2I-2"
+    },
+    {
+      "id": "DB2I-15",
+      "runner": "protocol",
+      "file": "backend/src/Dbbliss.Backend/Catalog/Db2iCatalog.cs",
+      "why": "an object cannot be found by its system name",
+      "find": "AND (TABLE_NAME = @name OR SYSTEM_TABLE_NAME = @name)",
+      "replace": "AND (TABLE_NAME = @name)",
+      "tests": [
+        "db2i_names_resolve_like_the_server_reads_them"
+      ],
+      "verifies": "LLR-DB2I-3"
     }
   ]
 }

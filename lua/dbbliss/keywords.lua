@@ -34,4 +34,13 @@ M.sqlserver = {
     option, nolock, readuncommitted, rowlock, updlock, natural, try_convert, getdate, isnull, current_timestamp, cast, convert]]),
 }
 
+-- DB2 for i (unverified): FETCH FIRST n ROWS ONLY limits rows; no LIMIT, no EXPLAIN statement.
+M.db2i = {
+  start = list([[select, with, values, insert into, update, delete from, merge into, create, alter, drop, truncate table, call, begin,
+    commit, rollback, savepoint, release savepoint, set, declare, grant, revoke, lock table, comment on, label on, rename table,
+    declare global temporary table]]),
+  inside = list(COMMON .. [[, fetch first, rows only, for update, for read only, optimize for, with ur, with cs, with rs, with rr,
+    skip locked data, current date, current timestamp, current schema, cast, lateral, nulls first, nulls last, offset, natural join]]),
+}
+
 return M

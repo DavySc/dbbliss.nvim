@@ -130,6 +130,26 @@ var tests = new (string Name, string Bug, Func<Task> Run)[]
     ("catalog_errors", "", CatalogTests.Errors),
     // Verifies: HLR-CAT-1, HLR-CAT-3
     ("catalog_shapes", "", CatalogTests.DescribeAndScriptShapes),
+    // Verifies: LLR-DB2I-4
+    ("db2i_parameters_become_positional_markers", "", () => { Db2iCatalogTests.ParametersBecomePositionalMarkers(); return Task.CompletedTask; }),
+    // Verifies: HLR-DB2I-1
+    ("db2i_tree_shows_system_schemas_folders", "", Db2iCatalogTests.TreeShowsTheSystemSchemasAndFolders),
+    // Verifies: LLR-DB2I-3
+    ("db2i_names_resolve_like_the_server_reads_them", "", Db2iCatalogTests.NamesResolveTheWayTheServerReadsThem),
+    // Verifies: LLR-DB2I-5
+    ("db2i_names_and_columns_for_completion", "", Db2iCatalogTests.NamesAndColumnsForCompletion),
+    // Verifies: HLR-DB2I-2
+    ("db2i_table_script_from_catalog_rows", "", Db2iCatalogTests.TableScriptIsBuiltFromCatalogRows),
+    // Verifies: HLR-DB2I-2
+    ("db2i_view_and_routine_scripts_are_stored_definitions", "", Db2iCatalogTests.ViewAndRoutineScriptsAreTheStoredDefinitions),
+    // Verifies: HLR-DB2I-2
+    ("db2i_identifiers_and_types_as_declared", "", () => { Db2iCatalogTests.IdentifiersAndTypesAreWrittenAsDeclared(); return Task.CompletedTask; }),
+    // Verifies: HLR-DB2I-2
+    ("db2i_generated_columns_that_cannot_be_scripted_are_refused", "", Db2iCatalogTests.GeneratedColumnsThatCannotBeScriptedAreRefused),
+    // Verifies: HLR-DB2I-2
+    ("db2i_routine_description_separates_parameters_from_return_value", "", Db2iCatalogTests.RoutineDescriptionSeparatesParametersFromTheReturnValue),
+    // Verifies: HLR-DB2I-2
+    ("db2i_table_description_sections", "", Db2iCatalogTests.TableDescriptionHasTheSections),
     // Verifies: HLR-COMP-1
     ("completion_names_through_the_catalog_session", "", CompletionTests.NamesAreListedThroughTheCatalogSession),
     // Verifies: HLR-COMP-1

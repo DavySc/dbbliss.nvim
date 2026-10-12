@@ -1,4 +1,5 @@
 using System.Data.Odbc;
+using Dbbliss.Backend.Catalog;
 using System.Globalization;
 
 namespace Dbbliss.Backend.Engines;
@@ -11,6 +12,8 @@ namespace Dbbliss.Backend.Engines;
 public sealed class Db2iEngine : IEngine
 {
     public string Name => "db2i";
+
+    public ICatalog? Catalog { get; } = new Db2iCatalog();
 
     public Sessions.ISessionAdmin? Sessions => null;
 
@@ -99,6 +102,33 @@ public sealed class Db2iEngine : IEngine
                     control.ClearProtocolCancel();
                 }
             }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+        // Catalog queries: ODBC has positional markers only (Db2iSql.Positional). Unverified on a real IBM i.
+        public Task<IReadOnlyList<QueryTable>> QueryAsync(string sql, IReadOnlyDictionary<string, object?>? parameters, CancellationToken ct) =>
+            Task.Run<IReadOnlyList<QueryTable>>(() =>
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = Db2iSql.Positional(sql, parameters, out var values);
+                cmd.CommandTimeout = 30;
+                cmd.Transaction = _tx;
+                foreach (var v in values) cmd.Parameters.Add(new OdbcParameter { Value = v ?? DBNull.Value });
+                var tables = new List<QueryTable>();
+                using var reader = cmd.ExecuteReader();
+                do
+                {
+                    var columns = Enumerable.Range(0, reader.FieldCount).Select(reader.GetName).ToArray();
+                    var rows = new List<object?[]>();
+                    while (reader.Read())
+                    {
+                        var row = new object?[columns.Length];
+                        for (var i = 0; i < row.Length; i++) row[i] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                        rows.Add(row);
+                    }
+                    if (columns.Length > 0) tables.Add(new QueryTable(columns, rows));
+                }
+                while (reader.NextResult());
+                return tables;
+            }, ct);
 
         public Task BeginTransactionAsync(CancellationToken ct) => Task.Run(() =>
         {
