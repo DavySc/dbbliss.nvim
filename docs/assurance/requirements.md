@@ -623,6 +623,37 @@ At most `ai.max_tables` are included, and the rest named. Source: phase 6 plan; 
 `:Dbbliss ask [question]` shall take the statement under the cursor or the range (exactly one), ask for a
 question when none is given, and be completed. Source: phase 6 plan.
 
+## Installation with Neovim packages (Phase 7)
+
+"Packages" are Neovim's built-in mechanism (`:help packages`: `pack/*/start`, `pack/*/opt` with `:packadd`) and
+`vim.pack` (Neovim 0.12+), which installs into the same layout. The plugin shall need nothing else.
+
+### HLR-PACK-1
+The plugin shall load and work from a `pack/*/start/` directory and from a `pack/*/opt/` directory after `:packadd`, with no
+change to `'runtimepath'` by the user, and wherever the package sits (a path with spaces, a symlink): the `:Dbbliss` command
+exists, `require('dbbliss')` works and the backend is looked for inside the package. Source: user request 2026-10-12.
+
+### LLR-PACK-2
+After `vim.pack.add()` installs or updates the plugin, one documented `PackChanged` handler shall be enough to build the backend
+(`require('dbbliss.build').run()`), and the plugin shall work in the same session once it is built. Source: HLR-PACK-1.
+
+### LLR-PACK-3
+A missing backend shall be reported with the path that was looked for and the fix (`:Dbbliss build`, or the script for the
+platform), never as a bare spawn failure. Source: HLR-PACK-1; priority "no silent failures".
+
+### LLR-PACK-4
+`build` shall run the platform's build script (`scripts/build.sh <rid>`, `scripts\build.ps1 -Rid <rid>`) in the package
+directory without blocking Neovim, refuse with a clear message when `dotnet` is not installed, report the exit code and the
+tail of the output when it fails, and report success only if the backend executable exists afterwards. Source: HLR-PACK-1.
+
+### LLR-PACK-5
+The package shall carry its help (`doc/dbbliss.txt` with an up-to-date `doc/tags`), so `:help dbbliss` works after a
+`:packadd` or `vim.pack.add` without a separate `:helptags`. Source: HLR-PACK-1.
+
+### LLR-PACK-6
+`:checkhealth dbbliss` shall report the Neovim version against the minimum, whether the backend executable exists (and where),
+whether `dotnet` is available for building, and the platform identifier. Source: HLR-PACK-1.
+
 ## Client interface
 
 ### HLR-UI-1

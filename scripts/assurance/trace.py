@@ -47,6 +47,7 @@ SUITES = [
     ("lua-plan", "tests/nvim/plan_test.lua", r"^\s*'([a-z0-9_]+)',\s*$"),
     ("lua-completion", "tests/nvim/completion_test.lua", r"^\s*'([a-z0-9_]+)',\s*$"),
     ("lua-ai", "tests/nvim/ai_test.lua", r"^\s*'([a-z0-9_]+)',\s*$"),
+    ("lua-pack", "tests/nvim/pack_test.lua", r"^\s*'([a-z0-9_]+)',\s*$"),
     ("e2e", "tests/nvim/e2e_test.lua", r"^\s*'([a-z0-9_]+)',\s*$"),
 ]
 OTHER = ["spec/check.sh", ".editorconfig"]

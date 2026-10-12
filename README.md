@@ -11,13 +11,44 @@ line-delimited JSON-RPC on stdio.
 > Windows. Decisions to review: [docs/phase1-decisions.md](docs/phase1-decisions.md); Phase 0
 > (cancel) results: [docs/phase0-results.md](docs/phase0-results.md). DB2 for i is deferred.
 
+## Install
+
+dbbliss.nvim needs nothing but Neovim's own packages (`:help packages`; Neovim 0.10+), or `vim.pack` (Neovim 0.12+),
+which installs into the same layout. No `runtimepath` changes. After an install or update the **backend must be built once**
+(a package manager only copies files): that needs the .NET 10 SDK, and `:Dbbliss build` does it.
+
+**vim.pack** (Neovim 0.12+): register the build hook *before* `vim.pack.add`, which fires it while installing.
+
+```lua
+vim.api.nvim_create_autocmd('PackChanged', {
+  callback = function(ev)
+    local d = ev.data
+    if d.spec.name == 'dbbliss.nvim' and (d.kind == 'install' or d.kind == 'update') then
+      if not d.active then vim.cmd.packadd('dbbliss.nvim') end
+      require('dbbliss.build').run()      -- asynchronous; reports when it is done
+    end
+  end,
+})
+vim.pack.add({ 'https://github.com/DavySc/dbbliss.nvim' })
+require('dbbliss').setup({ connections = { --[[ see Configure ]] } })
+```
+
+**Classic packages** (also Neovim 0.10): clone into a `start` directory, or into `opt` and `:packadd dbbliss.nvim` first.
+
+```sh
+git clone https://github.com/DavySc/dbbliss.nvim ~/.local/share/nvim/site/pack/me/start/dbbliss.nvim
+nvim                                   # then :Dbbliss build, once and after every update (it takes a minute)
+```
+
+Then `:checkhealth dbbliss` tells what is missing (backend, `dotnet`), and `:help dbbliss` is there with no `:helptags`.
+For development, put a checkout on your `runtimepath` (or lazy.nvim: `{ dir = '/path/to/dbbliss.nvim' }`) and build with `scripts/build.sh`.
+
 ## Try it
 
 ```sh
 scripts/build.sh                         # or scripts\build.ps1 on Windows; needs the .NET 10 SDK
 ```
-Put the repository on your `runtimepath` (lazy.nvim: `{ dir = '/path/to/dbbliss.nvim', config = function() ... end }`),
-call `setup` as below, then in an SQL buffer:
+With the plugin installed as above (or a checkout on your `runtimepath`), call `setup` as below, then in an SQL buffer:
 
 ```
 :Dbbliss connect local_pg

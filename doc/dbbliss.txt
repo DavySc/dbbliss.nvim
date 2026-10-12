@@ -1,0 +1,114 @@
+*dbbliss.txt*  A database client for SQL Server and PostgreSQL
+
+==============================================================================
+CONTENTS                                                      *dbbliss-contents*
+
+  1. Introduction ............................................ |dbbliss|
+  2. Installation ............................................ |dbbliss-install|
+  3. Configuration ........................................... |dbbliss-config|
+  4. Commands ................................................ |dbbliss-commands|
+  5. Building the backend .................................... |dbbliss-build|
+  6. Health check ............................................ |dbbliss-health|
+
+==============================================================================
+1. Introduction                                                         *dbbliss*
+
+dbbliss.nvim runs SQL against SQL Server and PostgreSQL from Neovim 0.10 or
+newer. The Lua plugin talks to one
+persistent backend process (.NET 10) over JSON-RPC. Priorities: no silent
+failures, protocol-level cancel, no lost results, no surprise commits.
+
+The full documentation is the README in the plugin directory.
+
+==============================================================================
+2. Installation                                                 *dbbliss-install*
+
+The plugin needs nothing but Neovim's own packages (|packages|): put it in a
+"start" or an "opt" directory of a package, or let |vim.pack| (Neovim 0.12)
+install it. It does not need 'runtimepath' changes.
+
+The backend is a program that must be built once after installing (and after
+updates): |dbbliss-build|. A package manager only copies the files.
+
+Classic packages (Neovim 0.10+): >
+    git clone https://github.com/DavySc/dbbliss.nvim \
+        ~/.local/share/nvim/site/pack/me/start/dbbliss.nvim
+<
+Use "opt" instead of "start" to load it on demand: >
+    :packadd dbbliss.nvim
+<
+Call |dbbliss-setup| after the plugin is on 'runtimepath' (after `:packadd` for
+an "opt" package; "start" packages are available in init.lua).
+
+vim.pack (Neovim 0.12+), building the backend on install and on update: >
+    vim.api.nvim_create_autocmd('PackChanged', {
+      callback = function(ev)
+        local d = ev.data
+        if d.spec.name == 'dbbliss.nvim' and (d.kind == 'install' or d.kind == 'update') then
+          if not d.active then vim.cmd.packadd('dbbliss.nvim') end
+          require('dbbliss.build').run()
+        end
+      end,
+    })
+    vim.pack.add({ 'https://github.com/DavySc/dbbliss.nvim' })
+    require('dbbliss').setup({ connections = { ... } })
+<
+Register the autocmd before |vim.pack.add()|: it fires during that call. The
+help tags are shipped, so |:help| dbbliss works with no |:helptags|.
+
+==============================================================================
+3. Configuration                                                  *dbbliss-config*
+                                                                  *dbbliss-setup*
+>
+    require('dbbliss').setup({
+      connections = {
+        local_pg = {
+          engine = 'postgres',            -- 'postgres' | 'sqlserver'
+          env = 'dev',                    -- 'dev' | 'test' | 'prod'
+          connection_string = 'Host=localhost;Username=me;Database=app',
+          password = { env = 'APP_PG_PASSWORD' },  -- a reference, never a literal
+        },
+      },
+    })
+<
+Passwords are references ({ env = NAME }, { credman = target },
+{ pass = path }, { libsecret = { service = x } }); a literal password is
+refused. See the README for every option.
+
+==============================================================================
+4. Commands                                                     *dbbliss-commands*
+
+:Dbbliss {subcommand} [args]                                          *:Dbbliss*
+
+    connect {name}      open a connection
+    use {name}          bind the current buffer to a connection
+    exec / exec_all     run the statement under the cursor / the buffer
+    cancel              stop the running query (protocol-level)
+    plan [actual]       show the execution plan
+    info / tree / script   object info, schema tree, CREATE script
+    begin / commit / rollback / disconnect / status
+    build               build the backend (|dbbliss-build|)
+    ask [question]      ask an AI about the statement (opt-in, see README)
+
+==============================================================================
+5. Building the backend                                             *dbbliss-build*
+
+Needs the .NET 10 SDK (`dotnet` on PATH). The result is a self-contained single
+file under `bin/<runtime-id>/`, so Neovim's machine needs no .NET runtime.
+
+    :Dbbliss build                                                *:Dbbliss-build*
+
+        Runs `scripts/build.sh` (or `scripts\build.ps1` on Windows) in the
+        plugin directory without blocking Neovim, and reports the result:
+        success only if the executable exists afterwards. From Lua:
+        `require('dbbliss.build').run({ on_done = function(ok, message) end })`.
+
+==============================================================================
+6. Health check                                                    *dbbliss-health*
+
+    :checkhealth dbbliss
+
+reports the Neovim version, the platform, whether the backend executable
+exists and where, and whether `dotnet` is available.
+
+ vim:tw=78:ts=8:ft=help:norl:

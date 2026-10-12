@@ -6,6 +6,8 @@ protocol-level cancel, no lost results, no surprise commits), performance, Windo
 
 ## Status (2026-10-11)
 
+**Installing with Neovim packages / `vim.pack` is on `main`** (decision 79, `docs/install-decisions.md`): `lua/dbbliss/build.lua` (`:Dbbliss build`), `health.lua`, `doc/` (keep `doc/tags` current: `nvim --clean -c 'helptags doc' -c q`), `tests/nvim/pack_test.lua`, CI job `lua-vim-pack` (Neovim 0.12.2).
+
 **Phase 6 (AI hook: `:Dbbliss ask`) is complete and on `main`.** Decisions: `docs/phase6-decisions.md` (73–76). Code: `ai.lua`; tests `tests/nvim/ai_test.lua` (+ `ai_echo.lua`), client and e2e steps. Next: DB2 for i support. The user has no IBM i; the plan is to build from DBeaver's open-source DB2 for i support and IBM's documentation as the reference, with everything marked unverified until run on a real system (`docs/db2i-checklist.md`).
 
 **Phase 5 (plan viewer, completion) is complete and on `main`** (decisions reviewed and accepted by the user). Built spec-first (`HLR-PLAN-1..8`, `LLR-PLAN-9..12`, `HLR-COMP-1`,

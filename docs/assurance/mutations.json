@@ -75,6 +75,20 @@
         "-l",
         "tests/nvim/ai_test.lua"
       ]
+    },
+    "lua-pack": {
+      "build": [
+        "true"
+      ],
+      "test": [
+        "{nvim}",
+        "--headless",
+        "--clean",
+        "--cmd",
+        "set rtp^=.",
+        "-l",
+        "tests/nvim/pack_test.lua"
+      ]
     }
   },
   "mutations": [
@@ -1250,6 +1264,114 @@
         "buffer_status_lists_the_most_recent_first_and_marks_default_and_this_buffer"
       ],
       "verifies": "LLR-UI-6"
+    },
+    {
+      "id": "PACK-1",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/build.lua",
+      "why": "a failing build is reported as a success",
+      "find": "if res.code ~= 0 then",
+      "replace": "if res.code == 99 then",
+      "tests": [
+        "build_reports_the_exit_code_and_output_tail_of_a_failed_build"
+      ],
+      "verifies": "LLR-PACK-4"
+    },
+    {
+      "id": "PACK-2",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/build.lua",
+      "why": "a build that made no executable is a success",
+      "find": "if not uv.fs_stat(exe) then",
+      "replace": "if uv.fs_stat(exe) == 1 then",
+      "tests": [
+        "build_succeeds_only_if_the_backend_exists_afterwards"
+      ],
+      "verifies": "LLR-PACK-4"
+    },
+    {
+      "id": "PACK-3",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/build.lua",
+      "why": "the build runs without dotnet",
+      "find": "if not executable('dotnet') then",
+      "replace": "if executable('dotnet') == 42 then",
+      "tests": [
+        "build_refuses_without_dotnet_and_says_what_to_install"
+      ],
+      "verifies": "LLR-PACK-4"
+    },
+    {
+      "id": "PACK-4",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/build.lua",
+      "why": "Windows and Linux runtime identifiers swapped",
+      "find": "(p.os == 'windows' and 'win-' or 'linux-')",
+      "replace": "(p.os == 'windows' and 'linux-' or 'win-')",
+      "tests": [
+        "build_command_is_the_platform_script_with_the_runtime_identifier"
+      ],
+      "verifies": "LLR-PACK-4"
+    },
+    {
+      "id": "PACK-5",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/build.lua",
+      "why": "the plugin directory is taken one level too high",
+      "find": "return vim.fn.fnamemodify(src, ':p:h:h:h')",
+      "replace": "return vim.fn.fnamemodify(src, ':p:h:h')",
+      "tests": [
+        "pack_start_directory_loads_the_plugin_and_finds_its_backend_inside"
+      ],
+      "verifies": "HLR-PACK-1"
+    },
+    {
+      "id": "PACK-6",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/backend.lua",
+      "why": "the missing-backend message does not name the fix",
+      "find": "Build it with :Dbbliss build (needs the .NET 10 SDK), or run",
+      "replace": "Build it, or run",
+      "tests": [
+        "pack_missing_backend_names_the_path_and_the_fix"
+      ],
+      "verifies": "LLR-PACK-3"
+    },
+    {
+      "id": "PACK-7",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/health.lua",
+      "why": "a missing backend is only a warning",
+      "find": "health.error('backend not found: ' .. exe,",
+      "replace": "health.warn('backend not found: ' .. exe,",
+      "tests": [
+        "health_check_reports_version_backend_dotnet_and_platform"
+      ],
+      "verifies": "LLR-PACK-6"
+    },
+    {
+      "id": "PACK-8",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/build.lua",
+      "why": "the Windows command runs bash",
+      "find": "  if p.os == 'windows' then\n    return { 'powershell'",
+      "replace": "  if p.os == 'nowhere' then\n    return { 'powershell'",
+      "tests": [
+        "build_command_is_the_platform_script_with_the_runtime_identifier"
+      ],
+      "verifies": "LLR-PACK-4"
+    },
+    {
+      "id": "PACK-9",
+      "runner": "lua-pack",
+      "file": "lua/dbbliss/init.lua",
+      "why": ":Dbbliss build does nothing",
+      "find": "    require('dbbliss.build').run()\n  end,",
+      "replace": "    -- nothing\n  end,",
+      "tests": [
+        "dbbliss_build_subcommand_runs_the_build_and_is_completed"
+      ],
+      "verifies": "LLR-PACK-4"
     }
   ]
 }

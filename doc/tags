@@ -1,0 +1,11 @@
+:Dbbliss	dbbliss.txt	/*:Dbbliss*
+:Dbbliss-build	dbbliss.txt	/*:Dbbliss-build*
+dbbliss	dbbliss.txt	/*dbbliss*
+dbbliss-build	dbbliss.txt	/*dbbliss-build*
+dbbliss-commands	dbbliss.txt	/*dbbliss-commands*
+dbbliss-config	dbbliss.txt	/*dbbliss-config*
+dbbliss-contents	dbbliss.txt	/*dbbliss-contents*
+dbbliss-health	dbbliss.txt	/*dbbliss-health*
+dbbliss-install	dbbliss.txt	/*dbbliss-install*
+dbbliss-setup	dbbliss.txt	/*dbbliss-setup*
+dbbliss.txt	dbbliss.txt	/*dbbliss.txt*

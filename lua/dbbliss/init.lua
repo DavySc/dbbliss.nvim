@@ -92,18 +92,8 @@ local function connection_by_id(id)
   end
 end
 
-local function plugin_root()
-  local src = debug.getinfo(1, 'S').source:sub(2)
-  return vim.fn.fnamemodify(src, ':p:h:h:h')
-end
-
 local function default_backend_cmd()
-  local uname = (vim.uv or vim.loop).os_uname()
-  local arch = (uname.machine == 'aarch64' or uname.machine == 'arm64') and 'arm64' or 'x64'
-  local is_win = vim.fn.has('win32') == 1
-  local rid = (is_win and 'win-' or 'linux-') .. arch
-  local exe = is_win and 'dbbliss-backend.exe' or 'dbbliss-backend'
-  return { vim.fs.joinpath(plugin_root(), 'bin', rid, exe) }
+  return { require('dbbliss.build').backend_path() }
 end
 
 ---@param opts dbbliss.Config?
@@ -1444,6 +1434,10 @@ local subcommands = {
   -- Writes the statement under the cursor (or the range) to a CSV file; the path may be left out.
   export = function(args, range)
     M.export(args[1], range and 'range' or 'statement', range)
+  end,
+  -- Builds the backend (needs the .NET 10 SDK): after installing the plugin with a package manager, which does not.
+  build = function()
+    require('dbbliss.build').run()
   end,
   -- Object info for a name (default: the one under the cursor).
   info = function(args)

@@ -47,7 +47,7 @@ function Backend:start()
   local exe = self.cmd[1]
   if vim.fn.executable(exe) ~= 1 then
     error(
-      ('dbbliss: backend not found or not executable: %s\nBuild it with scripts/build.sh (Linux) or scripts\\build.ps1 (Windows).'):format(
+      ('dbbliss: backend not found or not executable: %s\nBuild it with :Dbbliss build (needs the .NET 10 SDK), or run scripts/build.sh (Linux) or scripts\\build.ps1 (Windows).'):format(
         exe
       ),
       0

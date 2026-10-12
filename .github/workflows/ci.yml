@@ -115,6 +115,7 @@ jobs:
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/plan_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/completion_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/ai_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/pack_test.lua
 
       - name: End-to-end through the plugin (both engines)
         shell: bash
@@ -159,6 +160,23 @@ jobs:
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/plan_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/completion_test.lua
           nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/ai_test.lua
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/pack_test.lua
+
+  # Installing with Neovim's own package manager: vim.pack (0.12+) really clones and installs, and a PackChanged handler builds.
+  lua-vim-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: v0.12.2
+      - name: Pack tests with vim.pack required
+        env:
+          DBBLISS_REQUIRE_VIM_PACK: "1"
+        run: |
+          nvim --version | head -1
+          nvim --headless --clean --cmd 'set rtp^=.' -l tests/nvim/pack_test.lua
 
   # The formal models in spec/ (TLA+ query lifecycle, Quint client/transactions): the proposed design
   # must hold and every other variant must fail the documented way. Linux only; the models do not

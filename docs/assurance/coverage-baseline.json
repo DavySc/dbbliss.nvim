@@ -1,209 +1,215 @@
 {
- "backend/src/Dbbliss.Backend/Backend.cs": {
-  "branches": 99.63,
-  "lines": 99.47
- },
- "backend/src/Dbbliss.Backend/Catalog/CatalogHelpers.cs": {
-  "branches": 73.33,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Catalog/CatalogModels.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Catalog/ObjectNames.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Catalog/PostgresCatalog.cs": {
-  "branches": 67.86,
-  "lines": 87.78
- },
- "backend/src/Dbbliss.Backend/Catalog/SqlServerCatalog.cs": {
-  "branches": 76.67,
-  "lines": 95.56
- },
- "backend/src/Dbbliss.Backend/Credentials.cs": {
-  "branches": 86.21,
-  "lines": 81.37
- },
- "backend/src/Dbbliss.Backend/Engines/AdoQuery.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Engines/AdoStreaming.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Engines/IEngine.cs": {
-  "branches": 0.0,
-  "lines": 54.55
- },
- "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs": {
-  "branches": 83.33,
-  "lines": 87.5
- },
- "backend/src/Dbbliss.Backend/Engines/QueryControl.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs": {
-  "branches": 95.56,
-  "lines": 97.08
- },
- "backend/src/Dbbliss.Backend/Engines/ValueConverter.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Instances.cs": {
-  "branches": 100.0,
-  "lines": 88.37
- },
- "backend/src/Dbbliss.Backend/Log.cs": {
-  "branches": 100.0,
-  "lines": 81.25
- },
- "backend/src/Dbbliss.Backend/Management/ControlledExecution.cs": {
-  "branches": 93.75,
-  "lines": 97.67
- },
- "backend/src/Dbbliss.Backend/Management/IManagement.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Management/OperationManager.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Management/PostgresManagement.cs": {
-  "branches": 100.0,
-  "lines": 95.59
- },
- "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs": {
-  "branches": 97.62,
-  "lines": 96.43
- },
- "backend/src/Dbbliss.Backend/Management/SqlServerManagement.cs": {
-  "branches": 98.21,
-  "lines": 98.85
- },
- "backend/src/Dbbliss.Backend/Plans/PlanModels.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Plans/PlannerSupport.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Plans/PostgresPlanParser.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Plans/PostgresPlanner.cs": {
-  "branches": 91.67,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Plans/SqlServerPlanParser.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Plans/SqlServerPlanner.cs": {
-  "branches": 95.45,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Program.cs": {
-  "branches": 87.5,
-  "lines": 81.25
- },
- "backend/src/Dbbliss.Backend/Rpc/CsvExport.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Rpc/Output.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Rpc/ResultStreamer.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Rpc/RpcErrors.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Scripts/ScriptSplitter.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Sessions/ISessionAdmin.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Sessions/PostgresSessions.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Sessions/SessionIds.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "backend/src/Dbbliss.Backend/Sessions/SqlServerSessions.cs": {
-  "branches": 100.0,
-  "lines": 100.0
- },
- "lua/dbbliss/ai.lua": {
-  "lines": 93.04
- },
- "lua/dbbliss/backend.lua": {
-  "lines": 75.49
- },
- "lua/dbbliss/completion.lua": {
-  "lines": 95.47
- },
- "lua/dbbliss/completion/blink.lua": {
-  "lines": 100.0
- },
- "lua/dbbliss/completion/cmp.lua": {
-  "lines": 94.74
- },
- "lua/dbbliss/completion/shared.lua": {
-  "lines": 100.0
- },
- "lua/dbbliss/info.lua": {
-  "lines": 97.44
- },
- "lua/dbbliss/init.lua": {
-  "lines": 86.4
- },
- "lua/dbbliss/keywords.lua": {
-  "lines": 100.0
- },
- "lua/dbbliss/management.lua": {
-  "lines": 94.09
- },
- "lua/dbbliss/names.lua": {
-  "lines": 97.06
- },
- "lua/dbbliss/plan.lua": {
-  "lines": 97.24
- },
- "lua/dbbliss/render.lua": {
-  "lines": 97.4
- },
- "lua/dbbliss/results.lua": {
-  "lines": 89.43
- },
- "lua/dbbliss/script.lua": {
-  "lines": 100.0
- },
- "lua/dbbliss/sessions.lua": {
-  "lines": 97.35
- },
- "lua/dbbliss/tree.lua": {
-  "lines": 95.58
- }
+  "backend/src/Dbbliss.Backend/Backend.cs": {
+    "branches": 99.63,
+    "lines": 99.47
+  },
+  "backend/src/Dbbliss.Backend/Catalog/CatalogHelpers.cs": {
+    "branches": 73.33,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Catalog/CatalogModels.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Catalog/ObjectNames.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Catalog/PostgresCatalog.cs": {
+    "branches": 67.86,
+    "lines": 87.78
+  },
+  "backend/src/Dbbliss.Backend/Catalog/SqlServerCatalog.cs": {
+    "branches": 76.67,
+    "lines": 95.56
+  },
+  "backend/src/Dbbliss.Backend/Credentials.cs": {
+    "branches": 86.21,
+    "lines": 81.37
+  },
+  "backend/src/Dbbliss.Backend/Engines/AdoQuery.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Engines/AdoStreaming.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Engines/IEngine.cs": {
+    "branches": 0.0,
+    "lines": 54.55
+  },
+  "backend/src/Dbbliss.Backend/Engines/PostgresEngine.cs": {
+    "branches": 83.33,
+    "lines": 87.5
+  },
+  "backend/src/Dbbliss.Backend/Engines/QueryControl.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Engines/SqlServerEngine.cs": {
+    "branches": 95.56,
+    "lines": 97.08
+  },
+  "backend/src/Dbbliss.Backend/Engines/ValueConverter.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Instances.cs": {
+    "branches": 100.0,
+    "lines": 88.37
+  },
+  "backend/src/Dbbliss.Backend/Log.cs": {
+    "branches": 100.0,
+    "lines": 81.25
+  },
+  "backend/src/Dbbliss.Backend/Management/ControlledExecution.cs": {
+    "branches": 93.75,
+    "lines": 97.67
+  },
+  "backend/src/Dbbliss.Backend/Management/IManagement.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Management/OperationManager.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Management/PostgresManagement.cs": {
+    "branches": 100.0,
+    "lines": 95.59
+  },
+  "backend/src/Dbbliss.Backend/Management/ProcessRunner.cs": {
+    "branches": 97.62,
+    "lines": 96.43
+  },
+  "backend/src/Dbbliss.Backend/Management/SqlServerManagement.cs": {
+    "branches": 98.21,
+    "lines": 98.85
+  },
+  "backend/src/Dbbliss.Backend/Plans/PlanModels.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Plans/PlannerSupport.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Plans/PostgresPlanParser.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Plans/PostgresPlanner.cs": {
+    "branches": 91.67,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Plans/SqlServerPlanParser.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Plans/SqlServerPlanner.cs": {
+    "branches": 95.45,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Program.cs": {
+    "branches": 87.5,
+    "lines": 81.25
+  },
+  "backend/src/Dbbliss.Backend/Rpc/CsvExport.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Rpc/Output.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Rpc/ResultStreamer.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Rpc/RpcErrors.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Scripts/ScriptSplitter.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Scripts/StatementClassifier.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Sessions/ISessionAdmin.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Sessions/PostgresSessions.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Sessions/SessionIds.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "backend/src/Dbbliss.Backend/Sessions/SqlServerSessions.cs": {
+    "branches": 100.0,
+    "lines": 100.0
+  },
+  "lua/dbbliss/ai.lua": {
+    "lines": 93.04
+  },
+  "lua/dbbliss/backend.lua": {
+    "lines": 75.49
+  },
+  "lua/dbbliss/build.lua": {
+    "lines": 89.8
+  },
+  "lua/dbbliss/completion.lua": {
+    "lines": 95.47
+  },
+  "lua/dbbliss/completion/blink.lua": {
+    "lines": 100.0
+  },
+  "lua/dbbliss/completion/cmp.lua": {
+    "lines": 94.74
+  },
+  "lua/dbbliss/completion/shared.lua": {
+    "lines": 100.0
+  },
+  "lua/dbbliss/health.lua": {
+    "lines": 86.21
+  },
+  "lua/dbbliss/info.lua": {
+    "lines": 97.44
+  },
+  "lua/dbbliss/init.lua": {
+    "lines": 86.4
+  },
+  "lua/dbbliss/keywords.lua": {
+    "lines": 100.0
+  },
+  "lua/dbbliss/management.lua": {
+    "lines": 94.09
+  },
+  "lua/dbbliss/names.lua": {
+    "lines": 97.06
+  },
+  "lua/dbbliss/plan.lua": {
+    "lines": 97.24
+  },
+  "lua/dbbliss/render.lua": {
+    "lines": 97.4
+  },
+  "lua/dbbliss/results.lua": {
+    "lines": 89.43
+  },
+  "lua/dbbliss/script.lua": {
+    "lines": 100.0
+  },
+  "lua/dbbliss/sessions.lua": {
+    "lines": 97.35
+  },
+  "lua/dbbliss/tree.lua": {
+    "lines": 95.58
+  }
 }
