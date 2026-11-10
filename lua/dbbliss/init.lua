@@ -31,7 +31,7 @@ local TRANSACTION_OPEN = 1003
 ---@field results { window_rows: integer, max_col_width: integer }
 ---@field info { max_col_width: integer }
 ---@field tree { show_system: boolean }
----@field completion { keywords: boolean, keyword_case: 'match'|'upper'|'lower', max_age_s: number }  keywords: offer SQL keywords; max_age_s: reload names older than this in the background (0: never)
+---@field completion { keywords: boolean, keyword_case: 'match'|'upper'|'lower', max_age_s: number, offline_engine: string|fun(bufnr: integer): string?|nil }  keywords: offer SQL keywords; max_age_s: reload names older than this in the background (0: never); offline_engine: keywords of this engine ('postgres', 'sqlserver', or a function of the buffer) in a buffer with no connection
 ---@field mappings { info: string|false }  buffer-local keys in SQL buffers
 
 ---@type dbbliss.Config
@@ -189,6 +189,7 @@ function M.setup(opts)
     keywords = state.config.completion.keywords,
     keyword_case = state.config.completion.keyword_case,
     max_age_s = state.config.completion.max_age_s,
+    offline_engine = state.config.completion.offline_engine,
   })
   M._apply_mappings()
   results.setup({
@@ -804,6 +805,30 @@ function M._completion_connection(bufnr)
     return nil
   end
   return { id = conn.id, engine = conn.engine }
+end
+
+--- The connection a buffer's statements run on (its binding, else the default; LLR-UI-7), or nil.
+---@param bufnr integer?  default: the current buffer
+---@return { name: string, engine: string, env: string? }?
+function M.connection_of(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local name, conn = target(bufnr)
+  if not conn then
+    return nil
+  end
+  local cfg = state.config.connections[name] or {}
+  return { name = name, engine = conn.engine, env = cfg.env }
+end
+
+--- The statements of a buffer as ranges (see `dbbliss.completion.statements`), split for the engine of its
+--- connection, else its `completion.offline_engine`, else PostgreSQL. Reads the buffer only; sends nothing.
+---@param bufnr integer?  default: the current buffer
+---@return { start: integer[], ['end']: integer[], terminator: integer[]? }[]
+function M.statements(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  local _, conn = target(bufnr)
+  local engine = conn and conn.engine or completion.offline_engine(bufnr) or 'postgres'
+  return completion.statements(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), engine)
 end
 
 --- Asks the configured AI command about the statement under the cursor (or the one in the range): the statement, the

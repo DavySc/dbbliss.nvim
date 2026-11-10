@@ -494,11 +494,12 @@
       "id": "COMP-10",
       "runner": "lua-completion",
       "file": "lua/dbbliss/completion.lua",
-      "why": "a buffer without a connection is completed from nothing instead of answering empty",
-      "find": "  if not conn then\n    return cb({ items = {}, start = col, kind = 'none' })\n  end",
-      "replace": "  if not conn then\n    conn = { id = 'c1', engine = 'postgres' }\n  end",
+      "why": "a buffer without a connection or an offline engine is completed from something instead of answering empty",
+      "find": "    if not engine then\n      return cb({ items = {}, start = col, kind = 'none' })\n    end",
+      "replace": "    if not engine then\n      engine = 'postgres'\n    end",
       "tests": [
-        "completion_blink_adapter_is_thin_and_needs_no_plugin"
+        "completion_blink_adapter_is_thin_and_needs_no_plugin",
+        "completion_offline_engine_can_be_a_function_and_defaults_to_none"
       ],
       "verifies": "LLR-COMP-5"
     },
@@ -1372,6 +1373,126 @@
         "dbbliss_build_subcommand_runs_the_build_and_is_completed"
       ],
       "verifies": "LLR-PACK-4"
+    },
+    {
+      "id": "COMP-11",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a buffer with no connection is offered no keywords",
+      "find": "local items = ctx.kind == 'columns' and keyword_items(ctx, engine, statement) or {}",
+      "replace": "local items = {}",
+      "tests": [
+        "completion_offline_buffer_gets_keywords_of_its_engine_and_asks_nothing"
+      ],
+      "verifies": "HLR-COMP-13"
+    },
+    {
+      "id": "COMP-12",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "offline keywords are offered where only an object name can stand",
+      "find": "local items = ctx.kind == 'columns' and keyword_items(ctx, engine, statement) or {}",
+      "replace": "local items = keyword_items(ctx, engine, statement)",
+      "tests": [
+        "completion_offline_buffer_gets_keywords_of_its_engine_and_asks_nothing"
+      ],
+      "verifies": "HLR-COMP-13"
+    },
+    {
+      "id": "COMP-13",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "an offline_engine function is not called",
+      "find": "  if type(e) == 'function' then\n    local ok, v = pcall(e, bufnr)",
+      "replace": "  if false then\n    local ok, v = pcall(e, bufnr)",
+      "tests": [
+        "completion_offline_engine_can_be_a_function_and_defaults_to_none"
+      ],
+      "verifies": "HLR-COMP-13"
+    },
+    {
+      "id": "COMP-14",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a blank line does not end a statement",
+      "find": "if prev and blank_line_outside_comments(text:sub(prev.e + 1, t.s - 1)) then",
+      "replace": "if false and blank_line_outside_comments(text:sub(prev.e + 1, t.s - 1)) then",
+      "tests": [
+        "completion_statements_split_at_semicolons_blank_lines_and_go"
+      ],
+      "verifies": "LLR-COMP-14"
+    },
+    {
+      "id": "COMP-15",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "GO does not end a SQL Server batch",
+      "find": "      engine == 'sqlserver'\n      and t.type == 'word'",
+      "replace": "      false\n      and t.type == 'word'",
+      "tests": [
+        "completion_statements_split_at_semicolons_blank_lines_and_go"
+      ],
+      "verifies": "LLR-COMP-14"
+    },
+    {
+      "id": "COMP-16",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "the word go inside a statement is taken for a GO line",
+      "find": "      and lines[line_of(t.s)]:upper():match('^%s*GO%s*%d*%s*$')\n",
+      "replace": "",
+      "tests": [
+        "completion_statements_split_at_semicolons_blank_lines_and_go"
+      ],
+      "verifies": "LLR-COMP-14"
+    },
+    {
+      "id": "COMP-17",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "statements ignore the engine of the buffer connection",
+      "find": "local engine = conn and conn.engine or completion.offline_engine(bufnr) or 'postgres'",
+      "replace": "local engine = completion.offline_engine(bufnr) or 'postgres'",
+      "tests": [
+        "statements_split_for_the_connection_else_the_offline_engine"
+      ],
+      "verifies": "LLR-COMP-14"
+    },
+    {
+      "id": "UI-10",
+      "runner": "lua-client",
+      "file": "lua/dbbliss/init.lua",
+      "why": "connection_of ignores the buffer binding",
+      "find": "  bufnr = bufnr or vim.api.nvim_get_current_buf()\n  local name, conn = target(bufnr)",
+      "replace": "  bufnr = bufnr or vim.api.nvim_get_current_buf()\n  local name, conn = target(-1)",
+      "tests": [
+        "connection_of_follows_the_buffer_binding_rule"
+      ],
+      "verifies": "LLR-UI-10"
+    },
+    {
+      "id": "COMP-18",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a PostgreSQL $$ body is split at its ; and blank lines",
+      "find": "local toks = lex(text, engine, engine == 'postgres')",
+      "replace": "local toks = lex(text, engine, false)",
+      "tests": [
+        "completion_statements_keep_dollar_quotes_and_blank_lines_in_comments"
+      ],
+      "verifies": "LLR-COMP-14"
+    },
+    {
+      "id": "COMP-19",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a blank line inside a block comment ends a statement",
+      "find": "    if gap:sub(i, i + 1) == '/*' then\n      local _, e = gap:find('*/', i + 2, true)\n      i = (e or n) + 1\n    elseif",
+      "replace": "    if false then\n    elseif",
+      "tests": [
+        "completion_statements_keep_dollar_quotes_and_blank_lines_in_comments"
+      ],
+      "verifies": "LLR-COMP-14"
     }
   ]
 }

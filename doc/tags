@@ -7,5 +7,9 @@ dbbliss-config	dbbliss.txt	/*dbbliss-config*
 dbbliss-contents	dbbliss.txt	/*dbbliss-contents*
 dbbliss-health	dbbliss.txt	/*dbbliss-health*
 dbbliss-install	dbbliss.txt	/*dbbliss-install*
+dbbliss-lua	dbbliss.txt	/*dbbliss-lua*
+dbbliss-offline-completion	dbbliss.txt	/*dbbliss-offline-completion*
 dbbliss-setup	dbbliss.txt	/*dbbliss-setup*
+dbbliss.connection_of()	dbbliss.txt	/*dbbliss.connection_of()*
+dbbliss.statements()	dbbliss.txt	/*dbbliss.statements()*
 dbbliss.txt	dbbliss.txt	/*dbbliss.txt*

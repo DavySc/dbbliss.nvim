@@ -9,6 +9,7 @@ CONTENTS                                                      *dbbliss-contents*
   4. Commands ................................................ |dbbliss-commands|
   5. Building the backend .................................... |dbbliss-build|
   6. Health check ............................................ |dbbliss-health|
+  7. Lua functions ........................................... |dbbliss-lua|
 
 ==============================================================================
 1. Introduction                                                         *dbbliss*
@@ -75,6 +76,15 @@ Passwords are references ({ env = NAME }, { credman = target },
 { pass = path }, { libsecret = { service = x } }); a literal password is
 refused. See the README for every option.
 
+                                                   *dbbliss-offline-completion*
+A buffer with no connection gets no completion, unless you name the dialect
+whose keywords it should get:
+>
+    completion = { offline_engine = 'postgres' }  -- or 'sqlserver', or
+    -- function(bufnr) return 'sqlserver' end  (nil: none for this buffer)
+<
+Only keywords: names need a connection. Nothing is sent to the backend.
+
 ==============================================================================
 4. Commands                                                     *dbbliss-commands*
 
@@ -110,5 +120,21 @@ file under `bin/<runtime-id>/`, so Neovim's machine needs no .NET runtime.
 
 reports the Neovim version, the platform, whether the backend executable
 exists and where, and whether `dotnet` is available.
+
+==============================================================================
+7. Lua functions                                                    *dbbliss-lua*
+
+require('dbbliss').statements({bufnr})                    *dbbliss.statements()*
+    The statements of the buffer (default: current) as a list of ranges
+    `{ start = {row, col}, end = {row, col}, terminator = {row, col}? }`:
+    rows 1-based, columns 0-based bytes, ends inclusive; `terminator` is the
+    `;` when there is one. Split at `;`, blank lines and (SQL Server) `GO`
+    lines, never inside strings (PostgreSQL $$ too), quoted names or comments, for the engine
+    of the buffer's connection, else its offline engine, else PostgreSQL.
+    Reads the buffer only. Handy for text objects and motions.
+
+require('dbbliss').connection_of({bufnr})              *dbbliss.connection_of()*
+    The connection the buffer's statements would run on (its binding, else
+    the default) as `{ name, engine, env }`, or nil.
 
  vim:tw=78:ts=8:ft=help:norl:
