@@ -1415,8 +1415,8 @@
       "runner": "lua-completion",
       "file": "lua/dbbliss/completion.lua",
       "why": "a blank line does not end a statement",
-      "find": "if prev and text:sub(prev.e + 1, t.s - 1):find(",
-      "replace": "if false and text:sub(prev.e + 1, t.s - 1):find(",
+      "find": "if prev and blank_line_outside_comments(text:sub(prev.e + 1, t.s - 1)) then",
+      "replace": "if false and blank_line_outside_comments(text:sub(prev.e + 1, t.s - 1)) then",
       "tests": [
         "completion_statements_split_at_semicolons_blank_lines_and_go"
       ],
@@ -1469,6 +1469,30 @@
         "connection_of_follows_the_buffer_binding_rule"
       ],
       "verifies": "LLR-UI-10"
+    },
+    {
+      "id": "COMP-18",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a PostgreSQL $$ body is split at its ; and blank lines",
+      "find": "local toks = lex(text, engine, engine == 'postgres')",
+      "replace": "local toks = lex(text, engine, false)",
+      "tests": [
+        "completion_statements_keep_dollar_quotes_and_blank_lines_in_comments"
+      ],
+      "verifies": "LLR-COMP-14"
+    },
+    {
+      "id": "COMP-19",
+      "runner": "lua-completion",
+      "file": "lua/dbbliss/completion.lua",
+      "why": "a blank line inside a block comment ends a statement",
+      "find": "    if gap:sub(i, i + 1) == '/*' then\n      local _, e = gap:find('*/', i + 2, true)\n      i = (e or n) + 1\n    elseif",
+      "replace": "    if false then\n    elseif",
+      "tests": [
+        "completion_statements_keep_dollar_quotes_and_blank_lines_in_comments"
+      ],
+      "verifies": "LLR-COMP-14"
     }
   ]
 }

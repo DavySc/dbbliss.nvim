@@ -594,8 +594,8 @@ connection open); decision 80.
 `dbbliss.statements(bufnr)` shall return the statements of a buffer as ranges (start, end, and the
 terminating `;` when there is one), split for the engine of the buffer's connection, else its offline
 engine, else PostgreSQL. A statement ends at a `;`, at a blank line and, on SQL Server, at a `GO` line
-(with or without a count); none of these ends a statement inside a string, a quoted identifier or a
-comment. It reads the buffer only and sends nothing. Source: user request, 2026-11-10 (statement text
+(with or without a count); none of these ends a statement inside a string (on PostgreSQL also a
+dollar-quoted one, `$$ ... $$` or `$tag$ ... $tag$`), a quoted identifier or a comment. It reads the buffer only and sends nothing. Source: user request, 2026-11-10 (statement text
 objects in the editor); decision 80.
 
 ## AI hook (Phase 6)

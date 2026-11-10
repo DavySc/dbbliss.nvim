@@ -129,7 +129,7 @@ require('dbbliss').statements({bufnr})                    *dbbliss.statements()*
     `{ start = {row, col}, end = {row, col}, terminator = {row, col}? }`:
     rows 1-based, columns 0-based bytes, ends inclusive; `terminator` is the
     `;` when there is one. Split at `;`, blank lines and (SQL Server) `GO`
-    lines, never inside strings, quoted names or comments, for the engine
+    lines, never inside strings (PostgreSQL $$ too), quoted names or comments, for the engine
     of the buffer's connection, else its offline engine, else PostgreSQL.
     Reads the buffer only. Handy for text objects and motions.
 

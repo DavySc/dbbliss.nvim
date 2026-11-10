@@ -142,7 +142,8 @@ end
 ---@return table[] tokens
 ---@return string? open
 ---@return integer? open_at  where the open quote started
-local function lex(text, engine)
+---@param dollar boolean?  read PostgreSQL dollar-quoted strings ($$ ... $$, $tag$ ... $tag$) as strings
+local function lex(text, engine, dollar)
   local tokens, i, n = {}, 1, #text
   local function add(type, s, e)
     tokens[#tokens + 1] = { type = type, text = text:sub(s, e), s = s, e = e }
@@ -194,6 +195,14 @@ local function lex(text, engine)
           break
         end
       end
+    elseif dollar and (text:match('^%$%$', i) or text:match('^%$[%a_][%w_]*%$', i)) then
+      local delim = text:match('^%$%$', i) or text:match('^%$[%a_][%w_]*%$', i)
+      local _, e = text:find(delim, i + #delim, true)
+      if not e then
+        return tokens, 'string'
+      end
+      add('string', i, e)
+      i = e + 1
     elseif is_ident_byte(c) then
       local j = i
       while j < n and is_ident_byte(text:sub(j + 1, j + 1)) do
@@ -752,9 +761,29 @@ end
 
 -- Statements ----------------------------------------------------------------------------------------
 
+--- Whether the text between two tokens (whitespace and comments only) has a blank line outside its comments.
+---@param gap string
+---@return boolean
+local function blank_line_outside_comments(gap)
+  local i, n = 1, #gap
+  while i <= n do
+    if gap:sub(i, i + 1) == '/*' then
+      local _, e = gap:find('*/', i + 2, true)
+      i = (e or n) + 1
+    elseif gap:sub(i, i + 1) == '--' then
+      i = gap:find('\n', i, true) or n + 1 -- the newline that ends the comment still counts
+    elseif gap:find('^\n[ \t\r]*\n', i) then
+      return true
+    else
+      i = i + 1
+    end
+  end
+  return false
+end
+
 --- The statements of a text, as ranges: where each begins and ends, and its terminating `;` if it has one.
 --- A statement ends at a `;`, at a blank line, and (SQL Server) at a `GO` line; a `;`, blank line or `GO` inside a
---- string, a quoted identifier or a comment does not end one. Comments between statements belong to none.
+--- string (on PostgreSQL also a dollar-quoted one), a quoted identifier or a comment does not end one. Comments between statements belong to none.
 --- Rows are 1-based, columns 0-based bytes, ends inclusive.
 ---@param lines string[]
 ---@param engine string?
@@ -780,7 +809,7 @@ function M.statements(lines, engine)
   local function line_of(offset)
     return pos(offset)[1]
   end
-  local toks = lex(text, engine)
+  local toks = lex(text, engine, engine == 'postgres')
   local out, first, last = {}, nil, nil
   local function close(term)
     if first then
@@ -795,7 +824,7 @@ function M.statements(lines, engine)
       goto continue -- the count after GO
     end
     skip_line = nil
-    if prev and text:sub(prev.e + 1, t.s - 1):find('\n[ \t\r]*\n') then
+    if prev and blank_line_outside_comments(text:sub(prev.e + 1, t.s - 1)) then
       close(nil)
     end
     if t.type == 'punct' and t.text == ';' then

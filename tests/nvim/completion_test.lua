@@ -853,6 +853,31 @@ vim.list_extend(tests, {
       eq(completion.statements({ '', '  ' }, 'postgres'), {}, 'no statements in blank text')
     end,
   },
+  {
+    -- Verifies: LLR-COMP-14
+    'completion_statements_keep_dollar_quotes_and_blank_lines_in_comments',
+    function()
+      local pg = completion.statements({
+        'create function f() returns int as $$',
+        'begin perform 1;',
+        '',
+        '  return 1; end',
+        '$$ language plpgsql;',
+        'select $1, $2, $tag$ a;',
+        '',
+        'b $tag$;',
+        'select 1 /* a',
+        '',
+        'b */ from t;',
+      }, 'postgres')
+      eq(#pg, 3, 'three statements: ' .. vim.inspect(pg))
+      eq(pg[1], { start = { 1, 0 }, ['end'] = { 5, 18 }, terminator = { 5, 19 } }, 'a $$ body is one string')
+      eq(pg[2], { start = { 6, 0 }, ['end'] = { 8, 6 }, terminator = { 8, 7 } }, '$1 is a parameter, $tag$ a quote')
+      eq(pg[3], { start = { 9, 0 }, ['end'] = { 11, 10 }, terminator = { 11, 11 } }, 'nor a blank line in a comment')
+      local ms = completion.statements({ 'select $$;', 'select 1' }, 'sqlserver')
+      eq(#ms, 2, 'no dollar quotes on SQL Server: ' .. vim.inspect(ms))
+    end,
+  },
 })
 
 local failed = 0

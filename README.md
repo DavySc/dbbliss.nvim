@@ -277,7 +277,7 @@ the dialect whose keywords it should get: `'postgres'`, `'sqlserver'`, or a func
 them (nil: none for that buffer). Only keywords, since names need the catalog; nothing is sent to the backend.
 
 **Statements from Lua.** `require('dbbliss').statements(bufnr)` returns the buffer's statements as ranges (split at
-`;`, blank lines and SQL Server `GO` lines, never inside strings, quoted names or comments), for text objects and
+`;`, blank lines and SQL Server `GO` lines, never inside strings (PostgreSQL `$$` too), quoted names or comments), for text objects and
 motions in your own config; `require('dbbliss').connection_of(bufnr)` returns the connection the buffer runs on
 (`{ name, engine, env }`) or nil. See `:help dbbliss-lua`.
 
