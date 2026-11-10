@@ -272,6 +272,15 @@ require('dbbliss').setup({ completion = { keywords = true, keyword_case = 'match
 -- keyword_case: 'match' (the statement's case), 'upper' or 'lower'; max_age_s = 0 turns the background reload off
 ```
 
+**Without a connection.** A buffer with no connection is offered nothing, unless `completion.offline_engine` names
+the dialect whose keywords it should get: `'postgres'`, `'sqlserver'`, or a function of the buffer returning one of
+them (nil: none for that buffer). Only keywords, since names need the catalog; nothing is sent to the backend.
+
+**Statements from Lua.** `require('dbbliss').statements(bufnr)` returns the buffer's statements as ranges (split at
+`;`, blank lines and SQL Server `GO` lines, never inside strings, quoted names or comments), for text objects and
+motions in your own config; `require('dbbliss').connection_of(bufnr)` returns the connection the buffer runs on
+(`{ name, engine, env }`) or nil. See `:help dbbliss-lua`.
+
 It is a completion *source*; the plugin does not need blink.cmp or nvim-cmp, and offers an adapter for each:
 
 ```lua

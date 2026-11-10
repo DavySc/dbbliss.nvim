@@ -377,6 +377,50 @@ local tests = {
     end,
   },
   {
+    -- Verifies: LLR-UI-10
+    'connection_of_follows_the_buffer_binding_rule',
+    '',
+    function()
+      two_connections()
+      local b1 = sql_buffer({ 'select 1;' })
+      expect(dbbliss.connection_of(b1) == nil, 'no connection yet: nil')
+      dbbliss.connect('a')
+      answer_all()
+      local b2 = sql_buffer({ 'select 2;' })
+      dbbliss.connect('b')
+      answer_all()
+      local c = dbbliss.connection_of(b1)
+      expect(c and c.name == 'a' and c.engine == 'postgres', 'b1 is bound to a: ' .. vim.inspect(c))
+      expect(dbbliss.connection_of(b2).name == 'b', 'b2 to b')
+      local b3 = sql_buffer({ 'select 3;' })
+      expect(dbbliss.connection_of(b3).name == 'b', 'an unbound buffer gets the default')
+      expect(dbbliss.connection_of().name == 'b', 'default buffer: the current one')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-14
+    'statements_split_for_the_connection_else_the_offline_engine',
+    '',
+    function()
+      dbbliss.setup({
+        connections = { a = { engine = 'postgres', connection_string = 'Host=x' } },
+        completion = { offline_engine = 'sqlserver' },
+      })
+      local b = sql_buffer({ 'select 1', 'GO', 'select 2' })
+      local pending = #stub.requests
+      local list = dbbliss.statements(b)
+      expect(#list == 2, 'no connection: split as SQL Server, at GO: ' .. vim.inspect(list))
+      expect(vim.deep_equal(list[2].start, { 3, 0 }), 'the second begins after GO')
+      expect(#stub.requests == pending, 'nothing was sent to read the statements')
+      dbbliss.connect('a')
+      answer_all()
+      pending = #stub.requests
+      list = dbbliss.statements(b)
+      expect(#list == 1, 'on a PostgreSQL connection GO is just a word: ' .. vim.inspect(list))
+      expect(#stub.requests == pending, 'nothing was sent on a connection either')
+    end,
+  },
+  {
     -- Verifies: LLR-UI-5
     'buffer_use_rebinds_this_buffer_only',
     '',

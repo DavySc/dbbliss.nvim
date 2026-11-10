@@ -582,6 +582,22 @@ the next request, and never while a transaction is open on the connection (the c
 wait for its locks). Columns are reloaded lazily when asked for after the connection's schema changed.
 Source: user request; decision 69.
 
+### HLR-COMP-13
+A buffer with no connection shall be offered the keywords of its offline engine
+(`completion.offline_engine`: `postgres`, `sqlserver`, or a function of the buffer returning one of
+them), by the position rules of HLR-COMP-6 and the case rule of LLR-COMP-7, and no names. Completing
+in such a buffer shall never send anything to the backend. Without an offline engine (the default) it
+is offered nothing, as before. Source: user request, 2026-11-10 (most SQL is written with no
+connection open); decision 80.
+
+### LLR-COMP-14
+`dbbliss.statements(bufnr)` shall return the statements of a buffer as ranges (start, end, and the
+terminating `;` when there is one), split for the engine of the buffer's connection, else its offline
+engine, else PostgreSQL. A statement ends at a `;`, at a blank line and, on SQL Server, at a `GO` line
+(with or without a count); none of these ends a statement inside a string, a quoted identifier or a
+comment. It reads the buffer only and sends nothing. Source: user request, 2026-11-10 (statement text
+objects in the editor); decision 80.
+
 ## AI hook (Phase 6)
 
 ### HLR-AI-1
@@ -705,6 +721,11 @@ connected. Source: PR-028; the "no surprise" priority of `CLAUDE.md`.
 Closing a connection, and the backend ending, shall unbind every buffer bound to it. A bound buffer
 shall never be moved to another connection except by connecting from it, `:Dbbliss use`, or the
 explicit bind of LLR-UI-8. Source: PR-028.
+
+### LLR-UI-10
+`dbbliss.connection_of(bufnr)` shall return the connection the rule of LLR-UI-7 finds for the buffer
+(its name, engine and env tag), or nil when there is none, so that a configuration can follow the
+buffer's connection without private functions. Source: user request, 2026-11-10; decision 80.
 
 ## Withdrawn
 

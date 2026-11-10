@@ -55,6 +55,7 @@ local function fake(opts)
     max_age_s = opts.max_age_s or 0,
     keywords = opts.keywords ~= false,
     keyword_case = opts.keyword_case or 'match',
+    offline_engine = opts.offline_engine or false,
     request = function(conn_id, method, params, cb)
       f.calls[#f.calls + 1] = { conn_id = conn_id, method = method, params = params }
       f.pending[#f.pending + 1] = { method = method, params = params, cb = cb }
@@ -742,6 +743,117 @@ local tests = {
     end,
   },
 }
+
+--- Completes in a scratch SQL buffer with `line` and the cursor at its end; returns the result.
+local function in_buffer(line)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { line })
+  local got
+  completion.for_buffer(buf, 1, #line, function(r)
+    got = r
+  end)
+  return got
+end
+
+local function label_set(result)
+  local out = {}
+  for _, item in ipairs(result.items) do
+    out[item.label] = item.insert
+  end
+  return out
+end
+
+vim.list_extend(tests, {
+  {
+    -- Verifies: HLR-COMP-13
+    'completion_offline_buffer_gets_keywords_of_its_engine_and_asks_nothing',
+    function()
+      local f = fake({ no_connection = true, offline_engine = 'sqlserver' })
+      local got = in_buffer('sel')
+      expect(got and label_set(got).select == 'select', 'a statement opener: ' .. vim.inspect(got))
+      eq(got.start, 0, 'replaces the typed word')
+      got = in_buffer('SEL')
+      eq(label_set(got).select, 'SELECT', 'in the case typed (LLR-COMP-7)')
+      got = in_buffer('select top 5 * from orders whe')
+      expect(label_set(got).where, 'a clause keyword inside a statement')
+      got = in_buffer('select * from ')
+      eq(got.items, {}, 'no names offline, and no keywords where only a name can stand')
+      got = in_buffer("select 'sel")
+      eq(got.items, {}, 'nothing inside a string')
+      local tsql = in_buffer('select * from t cross ap')
+      expect(label_set(tsql).apply, 'SQL Server keywords: ' .. vim.inspect(label_set(tsql)))
+      eq(#f.calls, 0, 'nothing was asked of the backend')
+    end,
+  },
+  {
+    -- Verifies: HLR-COMP-13
+    'completion_offline_engine_can_be_a_function_and_defaults_to_none',
+    function()
+      local seen
+      local f = fake({
+        no_connection = true,
+        offline_engine = function(bufnr)
+          seen = bufnr
+          return vim.b[bufnr].dialect
+        end,
+      })
+      local got = in_buffer('sel')
+      eq(got.items, {}, 'the function says nil: nothing')
+      expect(type(seen) == 'number', 'the function is given the buffer')
+      local buf = vim.api.nvim_create_buf(false, true)
+      vim.b[buf].dialect = 'postgres'
+      vim.api.nvim_buf_set_lines(buf, 0, -1, false, { 'select * from t where x ilik' })
+      completion.for_buffer(buf, 1, #'select * from t where x ilik', function(r)
+        got = r
+      end)
+      expect(label_set(got).ilike, 'PostgreSQL keywords for this buffer')
+      vim.b[buf].dialect = 'oracle'
+      completion.for_buffer(buf, 1, 3, function(r)
+        got = r
+      end)
+      eq(got.items, {}, 'an engine it does not know: nothing')
+      fake({ no_connection = true })
+      eq(in_buffer('sel').items, {}, 'no offline engine (the default): nothing')
+      eq(#f.calls, 0, 'nothing asked')
+    end,
+  },
+  {
+    -- Verifies: LLR-COMP-14
+    'completion_statements_split_at_semicolons_blank_lines_and_go',
+    function()
+      local pg = completion.statements({
+        "select ';' as a; select 2",
+        '-- a comment; not a split',
+        'from t;',
+        '',
+        "insert into t values ('x",
+        '',
+        "y');",
+        '/* ; */ update t',
+        '',
+        'set a = 1',
+      }, 'postgres')
+      eq(#pg, 5, 'five statements: ' .. vim.inspect(pg))
+      eq(pg[1], { start = { 1, 0 }, ['end'] = { 1, 14 }, terminator = { 1, 15 } }, 'a ; in a string does not end it')
+      eq(pg[2], { start = { 1, 17 }, ['end'] = { 3, 5 }, terminator = { 3, 6 } }, 'nor one in a comment')
+      eq(pg[3], { start = { 5, 0 }, ['end'] = { 7, 2 }, terminator = { 7, 3 } }, 'nor a blank line in a string')
+      eq(pg[4], { start = { 8, 8 }, ['end'] = { 8, 15 } }, 'a blank line ends one; a comment before it is not part of it')
+      eq(pg[5].start, { 10, 0 }, 'the last')
+      local ms = completion.statements({
+        'select [a;b] from t',
+        'Go',
+        'exec p',
+        'GO 5',
+        'select 1 as go',
+      }, 'sqlserver')
+      eq(#ms, 3, 'GO lines split SQL Server batches: ' .. vim.inspect(ms))
+      eq(ms[1], { start = { 1, 0 }, ['end'] = { 1, 18 } }, 'a ; in [quotes] does not end it')
+      eq(ms[2], { start = { 3, 0 }, ['end'] = { 3, 5 } }, 'GO with a count')
+      eq(ms[3], { start = { 5, 0 }, ['end'] = { 5, 13 } }, 'go as a word inside a statement is not a separator')
+      eq(completion.statements({ '', '  ' }, 'postgres'), {}, 'no statements in blank text')
+    end,
+  },
+})
 
 local failed = 0
 for _, t in ipairs(tests) do

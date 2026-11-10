@@ -36,6 +36,9 @@ local deps = {
   max_age_s = 300, -- names older than this are reloaded in the background; 0 turns it off
   keywords = true,
   keyword_case = 'match', -- 'match' | 'upper' | 'lower'
+  --- The engine whose keywords a buffer with no connection gets: 'postgres', 'sqlserver', a function of the buffer
+  --- returning one of them (or nil), or nil for none. Nothing is ever asked of the backend for such a buffer.
+  offline_engine = nil, ---@type string|fun(bufnr: integer): string?|nil
 }
 
 local RETRY_AFTER_FAILURE_S = 10
@@ -732,8 +735,92 @@ function M.complete(args, cb)
   end
 end
 
+--- The engine a buffer without a connection is completed for (`offline_engine`), or nil.
+---@param bufnr integer
+---@return 'postgres'|'sqlserver'|nil
+function M.offline_engine(bufnr)
+  local e = deps.offline_engine
+  if type(e) == 'function' then
+    local ok, v = pcall(e, bufnr)
+    e = ok and v or nil
+  end
+  if e == 'postgres' or e == 'sqlserver' then
+    return e
+  end
+  return nil
+end
+
+-- Statements ----------------------------------------------------------------------------------------
+
+--- The statements of a text, as ranges: where each begins and ends, and its terminating `;` if it has one.
+--- A statement ends at a `;`, at a blank line, and (SQL Server) at a `GO` line; a `;`, blank line or `GO` inside a
+--- string, a quoted identifier or a comment does not end one. Comments between statements belong to none.
+--- Rows are 1-based, columns 0-based bytes, ends inclusive.
+---@param lines string[]
+---@param engine string?
+---@return { start: integer[], ['end']: integer[], terminator: integer[]? }[]
+function M.statements(lines, engine)
+  local text = table.concat(lines, '\n')
+  local starts = { 1 } -- byte offset of each line's first byte
+  for r = 1, #lines - 1 do
+    starts[r + 1] = starts[r] + #lines[r] + 1
+  end
+  local function pos(offset)
+    local lo, hi = 1, #starts
+    while lo < hi do
+      local mid = math.floor((lo + hi + 1) / 2)
+      if starts[mid] <= offset then
+        lo = mid
+      else
+        hi = mid - 1
+      end
+    end
+    return { lo, offset - starts[lo] }
+  end
+  local function line_of(offset)
+    return pos(offset)[1]
+  end
+  local toks = lex(text, engine)
+  local out, first, last = {}, nil, nil
+  local function close(term)
+    if first then
+      out[#out + 1] = { start = pos(first.s), ['end'] = pos(last.e), terminator = term and pos(term.e) or nil }
+    end
+    first, last = nil, nil
+  end
+  local skip_line = nil
+  for i, t in ipairs(toks) do
+    local prev = toks[i - 1]
+    if skip_line and line_of(t.s) == skip_line then
+      goto continue -- the count after GO
+    end
+    skip_line = nil
+    if prev and text:sub(prev.e + 1, t.s - 1):find('\n[ \t\r]*\n') then
+      close(nil)
+    end
+    if t.type == 'punct' and t.text == ';' then
+      close(t)
+    elseif
+      engine == 'sqlserver'
+      and t.type == 'word'
+      and t.text:upper() == 'GO'
+      and lines[line_of(t.s)]:upper():match('^%s*GO%s*%d*%s*$')
+    then
+      close(nil)
+      skip_line = line_of(t.s)
+    else
+      first = first or t
+      last = t
+    end
+    ::continue::
+  end
+  close(nil)
+  return out
+end
+
 --- Completion for a buffer position (what the adapters call). `cb` gets { items, start, kind } with `start` the
---- 0-based column in the line where the replaced word begins, and nothing for a buffer without a connection.
+--- 0-based column in the line where the replaced word begins. A buffer without a connection gets keywords of its
+--- `offline_engine`, or nothing when it has none.
 ---@param bufnr integer
 ---@param row integer  1-based
 ---@param col integer  0-based byte column
@@ -741,7 +828,16 @@ end
 function M.for_buffer(bufnr, row, col, cb)
   local conn = deps.connection_for(bufnr)
   if not conn then
-    return cb({ items = {}, start = col, kind = 'none' })
+    local engine = M.offline_engine(bufnr)
+    if not engine then
+      return cb({ items = {}, start = col, kind = 'none' })
+    end
+    -- Keywords only: with no connection there are no names, and nothing is sent anywhere.
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local before, statement = M.statement_at(lines, row, col)
+    local ctx = M.analyze(before, statement, engine)
+    local items = ctx.kind == 'columns' and keyword_items(ctx, engine, statement) or {}
+    return cb({ items = items, start = col - (#before - ctx.start), kind = ctx.kind })
   end
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local before, statement = M.statement_at(lines, row, col)
